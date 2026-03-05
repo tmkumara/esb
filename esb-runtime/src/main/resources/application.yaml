@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: finexatech-esb
+  profiles:
+    active: demo          # enables MockSoapController
+
+server:
+  port: 9090
+
+# ── ESB Config ──────────────────────────────────────────────────────────
+esb:
+  routes:
+    scan-pattern: "classpath:routes/*.yaml"
+    # External directory for API-deployed routes (persists across restarts)
+    # Defaults to a 'routes' folder next to the running JAR / project root
+    # Override per broker: -Desb.routes.store-dir=/opt/esb/broker-a/routes
+    store-dir: ${user.dir}/routes
+
+# ── Camel ───────────────────────────────────────────────────────────────
+camel:
+  springboot:
+    name: ESB-CamelContext
+    main-run-controller: true
+    jmx-enabled: false
+  servlet:
+    mapping:
+      context-path: "/api/*"
+
+# ── Actuator ────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,camelroutes,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# ── Logging ─────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.finexatech.esb: DEBUG
+    org.apache.camel: INFO
+    org.springframework: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId}] [%X{routeName}] %logger{36} - %msg%n"

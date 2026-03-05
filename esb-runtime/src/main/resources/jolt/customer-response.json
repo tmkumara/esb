@@ -1,0 +1,31 @@
+[
+  {
+    "operation": "shift",
+    "spec": {
+      "GetCustomerResponse": {
+        "customer": {
+          "id":          "id",
+          "firstName":   "firstName",
+          "lastName":    "lastName",
+          "email":       "email",
+          "accountType": "accountType",
+          "status":      "status",
+          "creditLimit": "creditLimit"
+        },
+        "metadata": {
+          "source":    "meta.source",
+          "timestamp": "meta.retrievedAt"
+        }
+      }
+    }
+  },
+  {
+    "operation": "default",
+    "spec": {
+      "meta": {
+        "transformedBy": "esb-finexatech",
+        "version":       "1.0"
+      }
+    }
+  }
+]

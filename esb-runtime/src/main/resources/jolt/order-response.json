@@ -1,0 +1,19 @@
+[
+  {
+    "operation": "shift",
+    "spec": {
+      "SubmitOrderResponse": {
+        "orderId":               "orderId",
+        "status":                "status",
+        "message":               "message",
+        "estimatedCompletion":   "estimatedCompletion"
+      }
+    }
+  },
+  {
+    "operation": "default",
+    "spec": {
+      "source": "esb-finexatech"
+    }
+  }
+]

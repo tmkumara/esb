@@ -1,0 +1,46 @@
+apiVersion: esb/v1
+kind: RouteSpec
+
+metadata:
+  name: order-submit
+  version: "1.0"
+  description: "POST /api/v1/orders → Jolt normalize → SOAP SubmitOrder → JSON ack"
+  tags: [order, soap, demo]
+  owner: trading-team
+
+source:
+  type: rest
+  method: POST
+  path: /v1/orders
+  consumes: application/json
+  produces: application/json
+
+target:
+  type: soap
+  operation: SubmitOrder
+  endpointUrl: "http://localhost:9090/mock/soap/order-service"
+  timeout:
+    connectMs: 5000
+    readMs: 30000
+  retry:
+    maxAttempts: 2
+    backoffType: fixed
+    initialDelayMs: 1000
+
+# Jolt: normalize incoming order JSON → canonical format before SOAP call
+# Jolt: SOAP XML response → simple JSON ack for the REST caller
+transform:
+  request:
+    type: jolt
+    resource: classpath:jolt/order-request.json
+  response:
+    type: jolt
+    resource: classpath:jolt/order-response.json
+
+correlation:
+  header: X-Correlation-ID
+  generateIfMissing: true
+
+errorHandling:
+  fallbackHttpStatus: 502
+  fallbackBody: '{"code":"ORDER_SUBMISSION_FAILED","message":"Order could not be submitted. Please try again."}'

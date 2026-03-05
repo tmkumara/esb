@@ -1,0 +1,23 @@
+[
+  {
+    "operation": "shift",
+    "spec": {
+      "orderId":     "orderReference",
+      "customerId":  "clientId",
+      "amount":      "totalAmount",
+      "currency":    "currency",
+      "orderType":   "type",
+      "side":        "buySell",
+      "quantity":    "quantity",
+      "instrument":  "instrumentCode",
+      "notes":       "remarks"
+    }
+  },
+  {
+    "operation": "default",
+    "spec": {
+      "currency": "GBP",
+      "status":   "PENDING"
+    }
+  }
+]
