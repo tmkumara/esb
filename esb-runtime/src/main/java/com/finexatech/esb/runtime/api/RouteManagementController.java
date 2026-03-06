@@ -100,6 +100,38 @@ public class RouteManagementController {
             .orElse(ResponseEntity.notFound().build());
     }
 
+    /** Suspend (pause) a live route — keeps it in registry, stops new messages */
+    @PostMapping("/routes/{name}/stop")
+    public ResponseEntity<Map<String, String>> stopRoute(@PathVariable("name") String name) {
+        if (registry.getSpec(name).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            registry.suspend(name);
+            return ResponseEntity.ok(Map.of("route", name, "status", "Suspended"));
+        } catch (Exception e) {
+            log.error("Failed to suspend route: {}", name, e);
+            return ResponseEntity.internalServerError()
+                .<Map<String, String>>body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /** Resume a suspended route */
+    @PostMapping("/routes/{name}/start")
+    public ResponseEntity<Map<String, String>> startRoute(@PathVariable("name") String name) {
+        if (registry.getSpec(name).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        try {
+            registry.resume(name);
+            return ResponseEntity.ok(Map.of("route", name, "status", "Started"));
+        } catch (Exception e) {
+            log.error("Failed to resume route: {}", name, e);
+            return ResponseEntity.internalServerError()
+                .<Map<String, String>>body(Map.of("error", e.getMessage()));
+        }
+    }
+
     /** Stop and remove a route */
     @DeleteMapping("/routes/{name}")
     public ResponseEntity<Map<String, String>> deregister(@PathVariable("name") String name) {

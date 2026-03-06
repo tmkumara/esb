@@ -1,5 +1,7 @@
 # ── Maven ─────────────────────────────────────────────────────────────
 target/
+# Un-ignore source package folders that are also named "target" (e.g. adapters/target/)
+!**/src/**/target/
 *.jar
 *.war
 *.class

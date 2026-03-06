@@ -46,6 +46,9 @@ export const esbApi = {
   persistRoute: (name: string, yaml: string) =>
     runtimeClient.post(`/manage/routes/${name}/persist`, yaml, TEXT_PLAIN),
   getHealth:    ()                         => runtimeClient.get('/manage/health'),
+  getAuditLog:  (limit: number)            => runtimeClient.get(`/manage/audit?limit=${limit}`),
+  stopRoute:    (name: string)             => runtimeClient.post(`/manage/routes/${name}/stop`),
+  startRoute:   (name: string)             => runtimeClient.post(`/manage/routes/${name}/start`),
 
   // ── Designer endpoints ────────────────────────────────────────────────────
   validateSpec:     (yaml: string) =>
