@@ -1,0 +1,23 @@
+apiVersion: esb/v1
+kind: Route
+metadata:
+  name: mock-balance-service
+source:
+  type: rest
+  method: POST
+  path: /mock/soap/balance-service
+target:
+  type: mock-response
+  mockStatusCode: 200
+  mockBody: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+        <soap:Body>
+          <GetAccountBalanceResponse xmlns="http://bank.com/core">
+            <accountNumber>12345</accountNumber>
+            <accountHolder>John Smith</accountHolder>
+            <balance>2500.75</balance>
+            <currency>USD</currency>
+          </GetAccountBalanceResponse>
+        </soap:Body>
+      </soap:Envelope>

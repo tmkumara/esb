@@ -11,6 +11,7 @@ public class SourceSpec {
     private String consumes;
     private String produces;
     private AuthSpec auth;
+    private long periodMs;   // for timer: source — poll interval in ms (default 5000)
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
@@ -26,4 +27,6 @@ public class SourceSpec {
     public void setProduces(String produces) { this.produces = produces; }
     public AuthSpec getAuth() { return auth; }
     public void setAuth(AuthSpec auth) { this.auth = auth; }
+    public long getPeriodMs() { return periodMs; }
+    public void setPeriodMs(long periodMs) { this.periodMs = periodMs; }
 }

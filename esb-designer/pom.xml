@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.finexatech</groupId>
+    <artifactId>esb-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>esb-designer</artifactId>
+  <name>ESB Designer — Route Builder + Validation Tooling</name>
+
+  <dependencies>
+    <!-- Validation pipeline, RouteAssembler, RouteSpecParser -->
+    <dependency>
+      <groupId>com.finexatech</groupId>
+      <artifactId>esb-compiler</artifactId>
+    </dependency>
+
+    <!-- Adapters needed for component discovery and dry-run -->
+    <dependency>
+      <groupId>com.finexatech</groupId>
+      <artifactId>esb-adapters</artifactId>
+    </dependency>
+
+    <!-- Spring Boot web (for management REST API) -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Camel Spring Boot — provides CamelContext bean for dry-run and adapter wiring -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- YAML config parsing (RouteSpecParser uses Jackson YAML) -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+    </dependency>
+
+    <!-- Jolt — TransformPreviewService -->
+    <dependency>
+      <groupId>com.bazaarvoice.jolt</groupId>
+      <artifactId>jolt-core</artifactId>
+    </dependency>
+
+    <!-- Groovy scripting — TransformPreviewService#previewGroovy -->
+    <dependency>
+      <groupId>org.apache.groovy</groupId>
+      <artifactId>groovy</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -7,6 +7,9 @@ import ValidationPage from './pages/ValidationPage';
 import MonitoringPage from './pages/MonitoringPage';
 import { ToastProvider } from './hooks/useToast';
 
+// designer mode shows Builder + Validation; runtime mode shows Monitor-only UI
+const isDesigner = import.meta.env.VITE_APP_MODE !== 'runtime';
+
 function App() {
   return (
     <BrowserRouter>
@@ -16,9 +19,12 @@ function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="routes" element={<RoutesPage />} />
-            <Route path="builder" element={<RouteBuilderPage />} />
-            <Route path="validation" element={<ValidationPage />} />
+            {isDesigner && <Route path="builder" element={<RouteBuilderPage />} />}
+            {isDesigner && <Route path="validation" element={<ValidationPage />} />}
             <Route path="monitoring" element={<MonitoringPage />} />
+            {/* Redirect builder/validation to dashboard in runtime mode */}
+            {!isDesigner && <Route path="builder" element={<Navigate to="/dashboard" replace />} />}
+            {!isDesigner && <Route path="validation" element={<Navigate to="/dashboard" replace />} />}
           </Route>
         </Routes>
       </ToastProvider>

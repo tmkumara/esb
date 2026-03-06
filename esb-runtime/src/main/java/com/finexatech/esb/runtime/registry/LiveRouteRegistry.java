@@ -1,6 +1,6 @@
 package com.finexatech.esb.runtime.registry;
 
-import com.finexatech.esb.compiler.assembly.RouteAssembler;
+import com.finexatech.esb.compiler.assembly.RouteAssemblerFacade;
 import com.finexatech.esb.compiler.validation.ValidationPipeline;
 import com.finexatech.esb.compiler.validation.ValidationReport;
 import com.finexatech.esb.spec.RouteSpec;
@@ -23,16 +23,16 @@ public class LiveRouteRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(LiveRouteRegistry.class);
 
-    private final CamelContext        camelContext;
-    private final RouteAssembler      assembler;
-    private final ValidationPipeline  validator;
+    private final CamelContext           camelContext;
+    private final RouteAssemblerFacade   assembler;
+    private final ValidationPipeline     validator;
 
     // Track live specs by route name
     private final Map<String, RouteSpec> liveSpecs = new ConcurrentHashMap<>();
 
     @Autowired
     public LiveRouteRegistry(CamelContext camelContext,
-                              RouteAssembler assembler,
+                              RouteAssemblerFacade assembler,
                               ValidationPipeline validator) {
         this.camelContext = camelContext;
         this.assembler    = assembler;
@@ -121,7 +121,7 @@ public class LiveRouteRegistry {
                 spec.getSource() != null ? spec.getSource().getType() : "?",
                 spec.getSource() != null ? spec.getSource().getMethod() : null,
                 spec.getSource() != null ? spec.getSource().getPath() : "?",
-                spec.getTarget() != null ? spec.getTarget().getType() : "?",
+                spec.getTarget() != null ? spec.getTarget().getType() : "routing",
                 String.valueOf(getStatus(spec.routeName())),
                 spec.getTransform() != null ? spec.getTransform().getRequest().getType() : null,
                 spec.getTransform() != null ? spec.getTransform().getResponse().getType() : null

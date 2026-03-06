@@ -42,6 +42,10 @@ public class RouteSpecLoader {
 
     @PostConstruct
     public void loadAll() {
+        if (scanPattern == null || scanPattern.isBlank()) {
+            log.info("RouteSpecLoader: scan-pattern is empty — skipping classpath route loading");
+            return;
+        }
         log.info("Loading route specs from: {}", scanPattern);
         List<String> failed  = new ArrayList<>();
         List<String> loaded  = new ArrayList<>();

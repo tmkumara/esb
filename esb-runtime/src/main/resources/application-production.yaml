@@ -1,0 +1,25 @@
+# ── Production Profile ───────────────────────────────────────────────────────
+# Purpose: pure execution engine — no mock controllers, no classpath seed routes.
+#          Routes come exclusively from the filesystem watch directory.
+#
+# Activated by: -Dspring.profiles.active=production
+# MockSoapController is NOT active (it requires @Profile("demo")).
+
+esb:
+  routes:
+    # Do NOT load any classpath routes in production.
+    # All routes come from the filesystem watch directory below.
+    scan-pattern: ""
+
+    # Override this at deploy time:
+    #   -Desb.routes.store-dir=/opt/esb/routes
+    #   or ESB_ROUTES_STORE_DIR=/opt/esb/routes  (env var)
+    store-dir: ${user.dir}/routes
+
+logging:
+  level:
+    com.finexatech.esb: INFO
+    org.apache.camel: WARN
+    org.springframework: WARN
+  file:
+    name: ${user.dir}/logs/esb-runtime.log

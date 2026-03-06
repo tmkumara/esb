@@ -2,7 +2,10 @@ spring:
   application:
     name: finexatech-esb
   profiles:
-    active: demo          # enables MockSoapController
+    active: demo          # default; override with -Dspring.profiles.active=init|production
+    group:
+      # 'init' activates 'demo' too so MockSoapController is available
+      init: [demo, init]
 
 server:
   port: 9090
@@ -15,6 +18,12 @@ esb:
     # Defaults to a 'routes' folder next to the running JAR / project root
     # Override per broker: -Desb.routes.store-dir=/opt/esb/broker-a/routes
     store-dir: ${user.dir}/routes
+  cors:
+    # Comma-separated list of origins allowed to call this runtime.
+    # In production set to your deployed UI domain(s).
+    # Override: -Desb.cors.allowed-origins=https://esb.example.com
+    allowed-origins:
+      - http://localhost:3000
 
 # ── Camel ───────────────────────────────────────────────────────────────
 camel:

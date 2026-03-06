@@ -38,17 +38,26 @@ public class RequiredFieldsRule implements SpecRule {
                 msgs.add(error("source.type", "source.type is required"));
             }
         }
-        if (spec.getTarget() == null) {
-            msgs.add(error("target", "target block is required"));
-        } else {
-            if (isBlank(spec.getTarget().getType())) {
-                msgs.add(error("target.type", "target.type is required"));
-            }
-            // mock-response and mock-echo carry their config inline — no endpointUrl needed
-            String ttype = spec.getTarget().getType();
-            boolean needsUrl = !"mock-response".equals(ttype) && !"mock-echo".equals(ttype);
-            if (needsUrl && isBlank(spec.getTarget().getEndpointUrl())) {
-                msgs.add(error("target.endpointUrl", "target.endpointUrl is required"));
+        // target is optional when:
+        //   (a) routing: block is present — CBR defines one target per rule
+        //   (b) process.steps ends in a terminal step (split, route-to) — flow terminates there
+        boolean hasRouting = spec.getRouting() != null;
+        boolean hasTerminalStep = spec.getProcess() != null &&
+                spec.getProcess().getSteps().stream()
+                        .anyMatch(s -> "split".equals(s.getType()) || "route-to".equals(s.getType()));
+        if (!hasRouting && !hasTerminalStep) {
+            if (spec.getTarget() == null) {
+                msgs.add(error("target", "target block is required (or use routing: / a split/route-to step)"));
+            } else {
+                if (isBlank(spec.getTarget().getType())) {
+                    msgs.add(error("target.type", "target.type is required"));
+                }
+                // mock-response and mock-echo carry their config inline — no endpointUrl needed
+                String ttype = spec.getTarget().getType();
+                boolean needsUrl = !"mock-response".equals(ttype) && !"mock-echo".equals(ttype);
+                if (needsUrl && isBlank(spec.getTarget().getEndpointUrl())) {
+                    msgs.add(error("target.endpointUrl", "target.endpointUrl is required"));
+                }
             }
         }
         return msgs;

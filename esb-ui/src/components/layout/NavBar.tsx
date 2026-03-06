@@ -1,13 +1,17 @@
 import { NavLink } from 'react-router-dom';
 import { Home, Route, Workflow, CheckCircle, Activity } from 'lucide-react';
 
-const navItems = [
-  { path: '/dashboard', label: 'HOME', icon: Home },
-  { path: '/routes', label: 'ROUTES', icon: Route },
-  { path: '/builder', label: 'BUILDER', icon: Workflow },
-  { path: '/validation', label: 'VALIDATION', icon: CheckCircle },
-  { path: '/monitoring', label: 'MONITORING', icon: Activity },
+const isDesigner = import.meta.env.VITE_APP_MODE !== 'runtime';
+
+const allNavItems = [
+  { path: '/dashboard',  label: 'HOME',       icon: Home,        designerOnly: false },
+  { path: '/routes',     label: 'ROUTES',     icon: Route,       designerOnly: false },
+  { path: '/builder',    label: 'BUILDER',    icon: Workflow,    designerOnly: true  },
+  { path: '/validation', label: 'VALIDATION', icon: CheckCircle, designerOnly: true  },
+  { path: '/monitoring', label: 'MONITORING', icon: Activity,    designerOnly: false },
 ];
+
+const navItems = allNavItems.filter(item => !item.designerOnly || isDesigner);
 
 export function NavBar() {
   return (

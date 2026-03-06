@@ -29,6 +29,8 @@ public class RouteSpec {
     private SourceSpec source;
     private TargetSpec target;
     private TransformSpec transform;
+    private ProcessSpec process;
+    private RoutingSpec routing;
     private CorrelationSpec correlation;
     private ErrorSpec errorHandling;
 
@@ -42,6 +44,12 @@ public class RouteSpec {
     public void setSource(SourceSpec source) { this.source = source; }
     public TargetSpec getTarget() { return target; }
     public void setTarget(TargetSpec target) { this.target = target; }
+
+    public ProcessSpec getProcess()             { return process; }
+    public void setProcess(ProcessSpec process) { this.process = process; }
+
+    public RoutingSpec getRouting()             { return routing; }
+    public void setRouting(RoutingSpec routing) { this.routing = routing; }
 
     public TransformSpec getTransform() {
         return transform != null ? transform : new TransformSpec();

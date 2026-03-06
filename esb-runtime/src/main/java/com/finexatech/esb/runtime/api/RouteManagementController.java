@@ -1,8 +1,7 @@
 package com.finexatech.esb.runtime.api;
 
-import com.finexatech.esb.compiler.assembly.RouteAssembler;
+import com.finexatech.esb.compiler.assembly.RouteAssemblerFacade;
 import com.finexatech.esb.compiler.loader.RouteSpecParser;
-import com.finexatech.esb.compiler.validation.ValidationPipeline;
 import com.finexatech.esb.compiler.validation.ValidationReport;
 import com.finexatech.esb.runtime.registry.LiveRouteRegistry;
 import com.finexatech.esb.spec.RouteSpec;
@@ -33,18 +32,15 @@ public class RouteManagementController {
     @Value("${esb.routes.store-dir:${user.home}/.esb/routes}")
     private String storeDir;
 
-    private final LiveRouteRegistry  registry;
-    private final ValidationPipeline validator;
-    private final RouteSpecParser    parser;
-    private final RouteAssembler     assembler;
+    private final LiveRouteRegistry    registry;
+    private final RouteSpecParser      parser;
+    private final RouteAssemblerFacade assembler;
 
     @Autowired
     public RouteManagementController(LiveRouteRegistry registry,
-                                      ValidationPipeline validator,
                                       RouteSpecParser parser,
-                                      RouteAssembler assembler) {
+                                      RouteAssemblerFacade assembler) {
         this.registry  = registry;
-        this.validator = validator;
         this.parser    = parser;
         this.assembler = assembler;
     }
@@ -61,22 +57,6 @@ public class RouteManagementController {
         return registry.getSpec(name)
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
-    }
-
-    /**
-     * Validate a YAML spec without deploying it.
-     * Body: raw YAML string of the RouteSpec.
-     */
-    @PostMapping("/routes/validate")
-    public ResponseEntity<ValidationReport> validate(@RequestBody String yaml) {
-        try {
-            RouteSpec spec   = parser.parseString(yaml, "api-request");
-            ValidationReport report = validator.validate(spec);
-            return ResponseEntity.ok(report);
-        } catch (Exception e) {
-            log.error("Validation request failed", e);
-            return ResponseEntity.badRequest().build();
-        }
     }
 
     /**
