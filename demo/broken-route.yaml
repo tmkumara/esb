@@ -1,0 +1,20 @@
+# DEMO: Paste this into the Validation page to show a STRUCTURAL failure
+# Missing: metadata.name → triggers STRUCTURAL layer error immediately
+apiVersion: esb/v1
+kind: Route
+metadata:
+  version: "1.0"
+source:
+  type: rest
+  method: POST
+  path: /v1/payments/submit
+target:
+  type: http
+  endpointUrl: http://payment-gateway/api/payments
+  timeout:
+    readMs: 30000
+transform:
+  request:
+    type: passthrough
+  response:
+    type: passthrough

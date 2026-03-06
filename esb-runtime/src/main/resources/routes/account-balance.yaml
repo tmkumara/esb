@@ -11,7 +11,7 @@ target:
   endpointUrl: http://localhost:9090/mock/soap/balance-service
   operation: doOperation
   timeout:
-    readMs: 300005
+    readMs: 30000
 transform:
   request:
     type: groovy

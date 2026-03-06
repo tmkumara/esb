@@ -229,23 +229,23 @@ export default function RoutesPage() {
                     <div className="flex items-center justify-end gap-2">
                       {route.status === 'Suspended' ? (
                         <Button
-                          variant="ghost"
+                          variant="success"
                           size="sm"
-                          icon={<Play className="w-3.5 h-3.5 text-green-600" />}
+                          icon={<Play className="w-3.5 h-3.5" />}
                           loading={togglingName === route.name}
                           onClick={() => handleToggle(route.name, route.status)}
                         >
-                          <span className="text-green-600">Start</span>
+                          Start
                         </Button>
                       ) : (
                         <Button
-                          variant="ghost"
+                          variant="danger"
                           size="sm"
-                          icon={<Square className="w-3.5 h-3.5 text-red-500" />}
+                          icon={<Square className="w-3.5 h-3.5" />}
                           loading={togglingName === route.name}
                           onClick={() => handleToggle(route.name, route.status)}
                         >
-                          <span className="text-red-500">Stop</span>
+                          Stop
                         </Button>
                       )}
                       <Button
