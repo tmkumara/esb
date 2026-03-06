@@ -15,6 +15,7 @@
     <module>esb-spec</module>
     <module>esb-compiler</module>
     <module>esb-adapters</module>
+    <module>esb-designer</module>
     <module>esb-runtime</module>
   </modules>
 

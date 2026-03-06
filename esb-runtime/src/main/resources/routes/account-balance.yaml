@@ -1,0 +1,21 @@
+apiVersion: esb/v1
+kind: Route
+metadata:
+  name: account-balance
+source:
+  type: rest
+  method: GET
+  path: /v1/accounts/{accountId}/balance
+target:
+  type: soap
+  endpointUrl: http://localhost:9090/mock/soap/balance-service
+  operation: doOperation
+  timeout:
+    readMs: 300005
+transform:
+  request:
+    type: groovy
+    inline: '"""<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:bank="http://bank.com/core"><soapenv:Header/><soapenv:Body><bank:GetAccountBalanceRequest><bank:accountNumber>${headers[''accountId''] ?: ''UNKNOWN''}</bank:accountNumber></bank:GetAccountBalanceRequest></soapenv:Body></soapenv:Envelope>"""'
+  response:
+    type: jolt
+    inline: '[{"operation":"shift","spec":{"GetAccountBalanceResponse":{"accountNumber":"accountNumber","accountHolder":"accountHolder","balance":"balance","currency":"currency"}}}]'

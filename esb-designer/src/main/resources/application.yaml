@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: finexatech-esb-designer
+
+server:
+  port: 9191
+
+# ── Designer Config ──────────────────────────────────────────────────────
+esb:
+  designer:
+    # Where saved YAML files are written.
+    # Set this to the runtime's watch directory so the runtime auto-loads them.
+    # Override: -Desb.designer.routes-output-dir=/path/to/esb-runtime/routes
+    routes-output-dir: ${user.dir}/../esb-runtime/routes
+  cors:
+    # Comma-separated list of origins allowed to call this designer.
+    # In production set to your deployed UI domain(s).
+    # Override: -Desb.cors.allowed-origins=https://esb.example.com
+    allowed-origins:
+      - http://localhost:3000
+
+# ── Camel ───────────────────────────────────────────────────────────────
+camel:
+  springboot:
+    name: ESB-Designer-CamelContext
+    # Designer does not expose business routes via Camel REST DSL.
+    # The CamelContext is used only for adapter discovery and dry-run validation.
+    main-run-controller: false
+    jmx-enabled: false
+
+# ── Logging ─────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.finexatech.esb: DEBUG
+    org.apache.camel: WARN
+    org.springframework: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

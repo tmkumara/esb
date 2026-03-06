@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:designer": "vite --mode designer",
+    "dev:runtime": "vite --mode runtime",
     "build": "tsc && vite build",
+    "build:designer": "tsc && vite build --mode designer",
+    "build:runtime": "tsc && vite build --mode runtime",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

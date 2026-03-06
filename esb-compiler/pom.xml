@@ -36,6 +36,12 @@
       <artifactId>slf4j-api</artifactId>
     </dependency>
 
+    <!-- JSONPath expression support for split + content-based routing -->
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-jsonpath</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>

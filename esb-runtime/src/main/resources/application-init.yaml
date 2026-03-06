@@ -1,0 +1,32 @@
+# ── Init Profile ─────────────────────────────────────────────────────────────
+# Purpose: stable Phase-1 baseline for Phase-2 complex-route development.
+#
+# Activated by: -Dspring.profiles.active=init
+# Profile group (application.yaml) auto-includes 'demo' →
+#   MockSoapController is active, all Phase-1 mock endpoints are reachable.
+#
+# What this profile does differently from 'demo':
+#   1. Uses a dedicated store-dir  (routes/dev/)  so Phase-2 routes stay
+#      separate from classpath/production routes.
+#   2. Turns on DEBUG logging for all ESB code.
+#   3. Triggers InitRuntimeBanner at startup — prints the pre-loaded route
+#      table and a "ready for Phase 2" prompt.
+
+esb:
+  routes:
+    # Classpath seed routes — the 4 working Phase-1 routes baked into the JAR.
+    # These are read-only; they load every time you start in init mode.
+    scan-pattern: "classpath:routes/*.yaml"
+
+    # Isolated dev store-dir. HotReloadWatcher watches this directory.
+    # Drop new Phase-2 YAML files here to deploy them live.
+    # Change to an absolute path on a remote server if needed.
+    store-dir: ${user.dir}/routes/dev
+
+logging:
+  level:
+    com.finexatech.esb: DEBUG
+    org.apache.camel: INFO
+    org.springframework: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{correlationId}] [%X{routeName}] %logger{30} - %msg%n"
