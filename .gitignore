@@ -18,6 +18,9 @@ esb-ui/node_modules/
 esb-ui/dist/
 esb-ui/.vite/
 
+# ── Frontend build cache (local toolchain, not source-controlled) ──────
+.frontend-cache/
+
 # ── ESB Runtime ───────────────────────────────────────────────────────
 # Persisted routes (user-specific, not source-controlled)
 esb-runtime/routes/
