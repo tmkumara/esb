@@ -1,0 +1,13 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: mock-bank-service
+
+logging:
+  level:
+    com.finexatech.mock: INFO
+    org.springframework: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [mock-bank] %logger{20} - %msg%n"

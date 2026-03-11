@@ -10,7 +10,7 @@ export function TopBar() {
         </div>
         <div>
           <span className="text-white font-extrabold text-lg tracking-wide leading-none">FINEXA</span>
-          <span className="text-blue-200 font-medium text-sm ml-1.5 leading-none">ESB</span>
+          <span className="text-blue-200 font-medium text-sm ml-1.5 leading-none">HUB</span>
         </div>
       </div>
 

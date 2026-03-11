@@ -13,6 +13,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
 
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -79,6 +80,12 @@ public class RouteSpecLoader {
                 }
             }
 
+        } catch (FileNotFoundException e) {
+            // Classpath routes directory doesn't exist in this JAR — normal for server deployments
+            // where routes are dropped into store-dir and loaded by HotReloadWatcher instead.
+            log.warn("RouteSpecLoader: classpath directory not found for pattern '{}' — " +
+                     "no bundled routes in this JAR. Routes will be loaded from store-dir by HotReloadWatcher.",
+                     scanPattern);
         } catch (Exception e) {
             log.error("Failed to scan route specs from: {}", scanPattern, e);
         }

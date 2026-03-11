@@ -27,10 +27,11 @@ import { esbApi } from '../api/esb-api';
 import { Button } from '../components/ui/Button';
 import { JoltFieldMapperModal } from '../components/route-builder/JoltFieldMapperModal';
 import { CodeEditorModal } from '../components/route-builder/CodeEditorModal';
+import { GroovySoapMapperModal } from '../components/route-builder/GroovySoapMapperModal';
 
 // ─── Transform editor plugin config ───────────────────────────────────────────
 interface TransformEditorConfig {
-  editorMode: 'visual-mapper' | 'code-editor' | 'none';
+  editorMode: 'visual-mapper' | 'soap-mapper' | 'soap-echo-mapper' | 'code-editor' | 'none';
   language?: string;
   inputFormat: 'json' | 'xml' | 'text';
   outputFormat: 'json' | 'xml' | 'text';
@@ -38,10 +39,12 @@ interface TransformEditorConfig {
 }
 
 const TRANSFORM_EDITOR_CONFIG: Record<string, TransformEditorConfig> = {
-  jolt:        { editorMode: 'visual-mapper', inputFormat: 'json',  outputFormat: 'json',  label: 'Field Mapper (JSON)' },
-  xslt:        { editorMode: 'code-editor',   language: 'xml',    inputFormat: 'xml',   outputFormat: 'xml',   label: 'XSLT Editor' },
-  groovy:      { editorMode: 'code-editor',   language: 'groovy', inputFormat: 'text',  outputFormat: 'text',  label: 'Script Editor' },
-  passthrough: { editorMode: 'none',          inputFormat: 'text',  outputFormat: 'text',  label: '' },
+  jolt:           { editorMode: 'visual-mapper', inputFormat: 'json',  outputFormat: 'json',  label: 'Field Mapper (JSON)' },
+  xslt:           { editorMode: 'code-editor',  language: 'xml',    inputFormat: 'xml',   outputFormat: 'xml',   label: 'XSLT Editor' },
+  groovy:         { editorMode: 'code-editor',  language: 'groovy', inputFormat: 'text',  outputFormat: 'text',  label: 'Script Editor' },
+  'groovy-soap':      { editorMode: 'soap-mapper',      inputFormat: 'json', outputFormat: 'xml', label: 'SOAP Field Mapper' },
+  'groovy-soap-echo': { editorMode: 'soap-echo-mapper', inputFormat: 'xml',  outputFormat: 'xml', label: 'SOAP Echo Mapper' },
+  passthrough:    { editorMode: 'none',          inputFormat: 'text',  outputFormat: 'text',  label: '' },
 };
 
 // ─── Node data types ──────────────────────────────────────────────────────────
@@ -103,7 +106,6 @@ function SourceNode({ data, selected }: { data: FlowNodeData; selected: boolean 
   return (
     <div className={`rounded-xl shadow-sm border-2 min-w-[160px] overflow-hidden transition-all ${selected ? 'border-blue-500 shadow-blue-200 shadow-md' : 'border-blue-200'}`}>
       <div className="bg-gradient-to-r from-blue-600 to-blue-500 px-3 py-2 flex items-center gap-1.5">
-        <Wifi className="w-3.5 h-3.5 text-white" />
         <span className="text-white text-xs font-bold uppercase tracking-wide">Source</span>
       </div>
       <div className="bg-white px-3 py-2.5 text-xs">
@@ -140,10 +142,7 @@ function TransformNode({ data, selected }: { data: FlowNodeData; selected: boole
           {isReq ? 'Req Transform' : 'Res Transform'}
         </span>
       </div>
-      <div className="bg-white px-3 py-2.5 text-xs">
-        <div className="font-semibold text-[#1e3a8a]">{data.label}</div>
-        <div className="mt-1 text-slate-400">{data.transformType || 'passthrough'}</div>
-      </div>
+
       <Handle type="target" position={Position.Left} style={handleStyle} className="!bg-purple-400 !border-white" />
       <Handle type="source" position={Position.Right} style={handleStyle} className="!bg-purple-500 !border-white" />
     </div>
@@ -155,7 +154,6 @@ function TargetNode({ data, selected }: { data: FlowNodeData; selected: boolean 
   return (
     <div className={`rounded-xl shadow-sm border-2 min-w-[160px] overflow-hidden transition-all ${selected ? 'border-orange-500 shadow-orange-200 shadow-md' : 'border-orange-200'}`}>
       <div className="bg-gradient-to-r from-orange-500 to-amber-500 px-3 py-2 flex items-center gap-1.5">
-        <Globe className="w-3.5 h-3.5 text-white" />
         <span className="text-white text-xs font-bold uppercase tracking-wide">Target</span>
       </div>
       <div className="bg-white px-3 py-2.5 text-xs">
@@ -655,22 +653,25 @@ function buildYaml(nodes: FlowNode[], edges: Edge[], routeName: string): string 
   if (reqT || resT) {
     lines.push(`transform:`);
     if (reqT) {
-      const type = reqT.data.transformType || 'passthrough';
+      const uiType = String(reqT.data.transformType || 'passthrough');
+      // groovy-soap is a UI-only concept; the backend adapter is plain "groovy"
+      const yamlType = uiType === 'groovy-soap' || uiType === 'groovy-soap-echo' ? 'groovy' : uiType;
       lines.push(`  request:`);
-      lines.push(`    type: ${type}`);
+      lines.push(`    type: ${yamlType}`);
       if (reqT.data.inlineSpec) {
         const raw = String(reqT.data.inlineSpec);
-        const compact = type === 'jolt' ? JSON.stringify(JSON.parse(raw)) : raw;
+        const compact = yamlType === 'jolt' ? JSON.stringify(JSON.parse(raw)) : raw;
         lines.push(`    inline: '${compact.replace(/'/g, "''")}'`);
       }
     }
     if (resT) {
-      const type = resT.data.transformType || 'passthrough';
+      const uiType = String(resT.data.transformType || 'passthrough');
+      const yamlType = uiType === 'groovy-soap' || uiType === 'groovy-soap-echo' ? 'groovy' : uiType;
       lines.push(`  response:`);
-      lines.push(`    type: ${type}`);
+      lines.push(`    type: ${yamlType}`);
       if (resT.data.inlineSpec) {
         const raw = String(resT.data.inlineSpec);
-        const compact = type === 'jolt' ? JSON.stringify(JSON.parse(raw)) : raw;
+        const compact = yamlType === 'jolt' ? JSON.stringify(JSON.parse(raw)) : raw;
         lines.push(`    inline: '${compact.replace(/'/g, "''")}'`);
       }
     }
@@ -907,7 +908,9 @@ function PropertyPanel({
                 onChange('transformType', e.target.value);
                 onChange('inlineSpec', undefined);
               }}>
-                <option value="jolt">Field Mapper (JSON)</option>
+                <option value="jolt">Field Mapper (JSON→JSON)</option>
+                <option value="groovy-soap">SOAP Field Mapper (JSON→SOAP)</option>
+                <option value="groovy-soap-echo">SOAP Echo Mapper (SOAP→SOAP)</option>
                 <option value="xslt">XSLT (XML→XML)</option>
                 <option value="groovy">Groovy Script</option>
                 <option value="passthrough">Passthrough</option>
@@ -1484,6 +1487,29 @@ function BuilderCanvas() {
               onSave={handleSave}
               initialSpec={node.data.inlineSpec as string | undefined}
               nodeLabel={String(node.data.label)}
+            />
+          );
+        }
+        if (config.editorMode === 'soap-mapper') {
+          return (
+            <GroovySoapMapperModal
+              isOpen
+              onClose={() => setTransformEditorTarget(null)}
+              onSave={handleSave}
+              initialSpec={node.data.inlineSpec as string | undefined}
+              nodeLabel={String(node.data.label)}
+            />
+          );
+        }
+        if (config.editorMode === 'soap-echo-mapper') {
+          return (
+            <GroovySoapMapperModal
+              isOpen
+              onClose={() => setTransformEditorTarget(null)}
+              onSave={handleSave}
+              initialSpec={node.data.inlineSpec as string | undefined}
+              nodeLabel={String(node.data.label)}
+              sourceType="soap"
             />
           );
         }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, RefreshCw, Search, ArrowRight, RotateCcw, Pencil } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Search, ArrowRight, RotateCcw, Pencil, Square, Play } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useRoutes } from '../hooks/useRoutes';
 import { useToast } from '../hooks/useToast';
@@ -44,6 +44,7 @@ export default function RoutesPage() {
   const [deploying, setDeploying] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [reloadingName, setReloadingName] = useState<string | null>(null);
+  const [togglingName, setTogglingName]   = useState<string | null>(null);
 
   useEffect(() => { fetchRoutes(); }, [fetchRoutes]);
 
@@ -76,6 +77,25 @@ export default function RoutesPage() {
       toast.error('Delete failed', err.displayMessage || err.message);
     } finally {
       setDeletingName(null);
+    }
+  };
+
+  const handleToggle = async (name: string, currentStatus: string) => {
+    setTogglingName(name);
+    try {
+      if (currentStatus === 'Suspended') {
+        await esbApi.startRoute(name);
+        toast.success('Route started', `"${name}" is now accepting messages.`);
+      } else {
+        await esbApi.stopRoute(name);
+        toast.success('Route suspended', `"${name}" is paused.`);
+      }
+      await fetchRoutes();
+    } catch (e: unknown) {
+      const err = e as { displayMessage?: string; message?: string };
+      toast.error('Toggle failed', err.displayMessage || err.message);
+    } finally {
+      setTogglingName(null);
     }
   };
 
@@ -207,6 +227,27 @@ export default function RoutesPage() {
                   </td>
                   <td className="px-5 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {route.status === 'Suspended' ? (
+                        <Button
+                          variant="success"
+                          size="sm"
+                          icon={<Play className="w-3.5 h-3.5" />}
+                          loading={togglingName === route.name}
+                          onClick={() => handleToggle(route.name, route.status)}
+                        >
+                          Start
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon={<Square className="w-3.5 h-3.5" />}
+                          loading={togglingName === route.name}
+                          onClick={() => handleToggle(route.name, route.status)}
+                        >
+                          Stop
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
