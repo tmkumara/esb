@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Route, Workflow, CheckCircle, Activity } from 'lucide-react';
+import { Home, Route, Workflow, CheckCircle, Activity, Shield } from 'lucide-react';
 
 const isDesigner = import.meta.env.VITE_APP_MODE !== 'runtime';
 
@@ -9,6 +9,7 @@ const allNavItems = [
   { path: '/builder',    label: 'BUILDER',    icon: Workflow,    designerOnly: true  },
   { path: '/validation', label: 'VALIDATION', icon: CheckCircle, designerOnly: true  },
   { path: '/monitoring', label: 'MONITORING', icon: Activity,    designerOnly: false },
+  { path: '/audit',      label: 'AUDIT',      icon: Shield,      designerOnly: false },
 ];
 
 const navItems = allNavItems.filter(item => !item.designerOnly || isDesigner);

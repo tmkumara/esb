@@ -1,5 +1,5 @@
 # ESB Platform — Complete Architecture Reference
-> Version: 1.0 | Status: Living Document | Stack: Apache Camel 4.x + Spring Boot 3.x
+> Version: 2.0 | Status: Living Document | Stack: Apache Camel 4.7.x + Spring Boot 3.3.x
 
 ---
 
@@ -9,17 +9,20 @@
 2. [The Key Insight: Camel Already Has the Catalog](#2-the-key-insight-camel-already-has-the-catalog)
 3. [Full System Architecture](#3-full-system-architecture)
 4. [Module Structure](#4-module-structure)
-5. [Component Registry Design](#5-component-registry-design)
-6. [Three-Tier Adapter Model](#6-three-tier-adapter-model)
-7. [Component Tier Rollout Strategy](#7-component-tier-rollout-strategy)
-8. [RouteAssembler — The Immutable Core](#8-routeassembler--the-immutable-core)
-9. [RouteSpec YAML Reference](#9-routespec-yaml-reference)
-10. [Validation Architecture — 5 Layers](#10-validation-architecture--5-layers)
-11. [Drag-and-Drop UI Integration](#11-drag-and-drop-ui-integration)
-12. [How to Add a New Component](#12-how-to-add-a-new-component)
-13. [Development Phases](#13-development-phases)
-14. [Technology Stack](#14-technology-stack)
-15. [Risk Register](#15-risk-register)
+5. [Three-Tier Adapter Model](#5-three-tier-adapter-model)
+6. [Component Tier Rollout Strategy](#6-component-tier-rollout-strategy)
+7. [RouteAssembler — The Immutable Core](#7-routeassembler--the-immutable-core)
+8. [RouteSpec YAML Reference](#8-routespec-yaml-reference)
+9. [Validation Architecture — 5 Layers](#9-validation-architecture--5-layers)
+10. [Interceptor Chain](#10-interceptor-chain)
+11. [Management API Reference](#11-management-api-reference)
+12. [Drag-and-Drop UI Integration](#12-drag-and-drop-ui-integration)
+13. [Spring Profiles](#13-spring-profiles)
+14. [Mock Bank Service (Demo)](#14-mock-bank-service-demo)
+15. [How to Add a New Component](#15-how-to-add-a-new-component)
+16. [Development Phases](#16-development-phases)
+17. [Technology Stack](#17-technology-stack)
+18. [Risk Register](#18-risk-register)
 
 ---
 
@@ -31,7 +34,7 @@ A configuration-driven Enterprise Service Bus where:
 - Routes are declared as **YAML specs** (human-readable, Git-stored)
 - A **compiler** validates and assembles Camel routes from specs
 - A **runtime** loads and manages live routes in Spring Boot
-- A **UI** (Phase 2+) draws pipelines that emit the same YAML
+- A **UI** draws pipelines visually that emit the same YAML
 - **300+ Camel components** are supported without touching core code
 
 ### The One Rule That Prevents Mess
@@ -42,7 +45,7 @@ A configuration-driven Enterprise Service Bus where:
 │                                                             │
 │  RouteAssembler     → NEVER changes                         │
 │  ValidationPipeline → NEVER changes                         │
-│  RouteRegistry      → NEVER changes                         │
+│  LiveRouteRegistry  → NEVER changes                         │
 │                                                             │
 │  Adding a new component = adding files in ONE place only    │
 │  Adding a new route     = adding ONE YAML file              │
@@ -107,16 +110,6 @@ EndpointValidationResult result = catalog.validateEndpointProperties(
     false,   // consumerOnly
     true     // producerOnly ← important: validate as a "to" endpoint
 );
-if (!result.isSuccess()) {
-    result.getUnknownParameters();   // Map<String,String> param → error
-    result.getInvalidValue();        // Map<String,String> bad type/range
-    result.getRequired();            // Set<String>  missing required params
-    result.summaryErrorMessage(true); // human-readable summary
-}
-
-// ── OFFLINE CATALOG (use for full component palette in UI backend) ───
-DefaultCamelCatalog offlineCatalog = new DefaultCamelCatalog(true); // caching=true
-List<String> all350 = offlineCatalog.findComponentNames();
 
 // ── YAML ROUTE HOT-RELOAD (Camel 4.x PluginHelper) ──────────────────
 import org.apache.camel.support.PluginHelper;
@@ -146,58 +139,70 @@ loader.loadRoutes(updatedResource);
 ║                          ESB PLATFORM                                        ║
 ║                                                                              ║
 ║  ┌─────────────────────────────────────────────────────────────────────┐    ║
-║  │                        DATA LAYER (Git)                             │    ║
-║  │  routes/*.yaml    transforms/*.xslt|*.jolt   wsdl/*.wsdl           │    ║
-║  │  components/overrides/*.yaml  (our metadata over Camel catalog)    │    ║
+║  │                        DATA LAYER (Git / Filesystem)                │    ║
+║  │  routes/*.yaml    transforms/*.jolt   wsdl/*.wsdl                   │    ║
+║  │  Stored in: classpath (demo) | /opt/esb/routes/${BROKER_ID} (prod)  │    ║
 ║  └────────────────────────────┬────────────────────────────────────────┘    ║
-║                               │ file watch / Git pull                        ║
+║                               │ file watch / startup scan                    ║
 ║  ┌────────────────────────────▼────────────────────────────────────────┐    ║
-║  │                     COMPILER LAYER                                  │    ║
+║  │                     COMPILER LAYER (esb-compiler)                   │    ║
 ║  │                                                                     │    ║
-║  │  RouteSpecLoader → RouteSpecValidator → RouteAssembler              │    ║
+║  │  RouteSpecParser → ValidationPipeline → RouteAssemblerFacade        │    ║
 ║  │                         │                    │                      │    ║
 ║  │              ┌──────────▼──────────┐  ┌──────▼──────────────────┐  │    ║
-║  │              │  ValidationPipeline  │  │  ComponentDescriptor    │  │    ║
-║  │              │  L1 Structural       │  │  Registry               │  │    ║
-║  │              │  L2 Schema           │  │  (Camel Catalog +       │  │    ║
-║  │              │  L3 Semantic         │  │   our overlays)         │  │    ║
-║  │              │  L4 Compatibility    │  └──────┬──────────────────┘  │    ║
+║  │              │  ValidationPipeline  │  │  RouteAssembler         │  │    ║
+║  │              │  L1 Structural       │  │  ComplexRouteAssembler  │  │    ║
+║  │              │  L2 Schema           │  │  (EIP patterns)         │  │    ║
+║  │              │  L3 Semantic         │  └──────┬──────────────────┘  │    ║
+║  │              │  L4 Compatibility    │         │                      │    ║
 ║  │              │  L5 DryRun           │         │                      │    ║
 ║  │              └──────────────────────┘         │                      │    ║
-║  │                                               │                      │    ║
 ║  │              ┌────────────────────────────────▼──────────────────┐  │    ║
 ║  │              │              ADAPTER REGISTRIES                    │  │    ║
 ║  │              │                                                    │  │    ║
-║  │              │  SourceAdapters:   rest | grpc | timer | mq | ... │  │    ║
-║  │              │  TargetAdapters:   soap | fixml | jms | ftp | ... │  │    ║
-║  │              │  TransformAdapters: xslt | jolt | groovy | ...    │  │    ║
-║  │              │  InterceptorChain: auth | retry | corr | metrics  │  │    ║
+║  │              │  SourceAdapters:    rest | direct | timer          │  │    ║
+║  │              │  TargetAdapters:    soap | rest | http-logged |    │  │    ║
+║  │              │                    mock-response | mock-echo       │  │    ║
+║  │              │  TransformAdapters: jolt | groovy | passthrough    │  │    ║
+║  │              │  InterceptorChain:  audit | error | retry | corr   │  │    ║
 ║  │              └────────────────────────────────────────────────────┘  │    ║
 ║  └────────────────────────────┬────────────────────────────────────────┘    ║
 ║                               │ assembled RouteBuilder instances             ║
 ║  ┌────────────────────────────▼────────────────────────────────────────┐    ║
-║  │                     RUNTIME LAYER                                   │    ║
+║  │                     RUNTIME LAYER (esb-runtime :9090)               │    ║
 ║  │                                                                     │    ║
-║  │  CamelContext ─── RouteRegistry ─── HotReloadWatcher               │    ║
+║  │  CamelContext ─── LiveRouteRegistry ─── HotReloadWatcher            │    ║
 ║  │       │                                                             │    ║
-║  │  Live Routes:                                                       │    ║
-║  │    customer-lookup  [REST→SOAP]     [RUNNING]                       │    ║
-║  │    order-submit     [REST→FIXML]    [RUNNING]                       │    ║
-║  │    report-pull      [Timer→FTP]     [RUNNING]                       │    ║
+║  │  Live Routes: [any YAML spec hot-loaded from filesystem]            │    ║
+║  │    bank-balance  [REST→SOAP]    [RUNNING]                           │    ║
+║  │    ...           [REST→REST]    [RUNNING]                           │    ║
 ║  └────────────────────────────┬────────────────────────────────────────┘    ║
 ║                               │                                              ║
 ║  ┌────────────────────────────▼────────────────────────────────────────┐    ║
 ║  │                  OBSERVABILITY LAYER                                │    ║
-║  │  MDC Correlation IDs │ Micrometer Metrics │ Structured JSON Logs   │    ║
+║  │  MDC Correlation IDs │ AuditStore (in-memory) │ Structured Logs     │    ║
 ║  └─────────────────────────────────────────────────────────────────────┘    ║
 ║                                                                              ║
 ║  ┌─────────────────────────────────────────────────────────────────────┐    ║
-║  │                   MANAGEMENT API  (Phase 2)                         │    ║
-║  │  GET  /api/components          list available components+metadata   │    ║
-║  │  POST /api/validate            validate a RouteSpec (any layer)     │    ║
-║  │  GET  /api/routes              list live routes + status            │    ║
-║  │  POST /api/routes              deploy a validated spec              │    ║
-║  │  PUT  /api/routes/{name}/reload hot-reload a route                  │    ║
+║  │                   MANAGEMENT API  (/manage/*)                       │    ║
+║  │  GET/POST /manage/routes     list + deploy routes                   │    ║
+║  │  POST     /manage/routes/{name}/start|stop  lifecycle               │    ║
+║  │  GET      /manage/audit      audit trail                            │    ║
+║  │  GET      /manage/health     health summary                         │    ║
+║  │  GET      /manage/components registered adapters                    │    ║
+║  └─────────────────────────────────────────────────────────────────────┘    ║
+║                                                                              ║
+║  ┌─────────────────────────────────────────────────────────────────────┐    ║
+║  │              DESIGNER (esb-designer :9191)                          │    ║
+║  │  POST /manage/routes/validate   validate without deploying          │    ║
+║  │  POST /manage/routes/save       validate + write to filesystem      │    ║
+║  │  POST /manage/transform-preview execute transform with test data    │    ║
+║  └─────────────────────────────────────────────────────────────────────┘    ║
+║                                                                              ║
+║  ┌─────────────────────────────────────────────────────────────────────┐    ║
+║  │              UI (esb-ui :3000)                                      │    ║
+║  │  React + Vite + TypeScript + Tailwind + React Flow                  │    ║
+║  │  Dashboard | Routes | Route Builder | Validation | Audit            │    ║
 ║  └─────────────────────────────────────────────────────────────────────┘    ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
@@ -207,204 +212,165 @@ loader.loadRoutes(updatedResource);
 ## 4. Module Structure
 
 ```
-esb/
+esb/                                  (parent pom: esb-parent v1.0.0-SNAPSHOT)
 │
 ├── esb-spec/                         ← Pure Java domain model. ZERO Spring.
-│   ├── RouteSpec.java                   Top-level spec record
-│   ├── SourceSpec.java
-│   ├── TargetSpec.java
-│   ├── TransformSpec.java
-│   ├── RoutingSpec.java               (content-based router, splitter, etc.)
-│   ├── ErrorSpec.java
-│   ├── RetrySpec.java
-│   ├── CorrelationSpec.java
-│   └── schema/
-│       └── route-spec-v1.json         JSON Schema for YAML validation (L2)
-│
-├── esb-catalog/                      ← Component Registry + Camel Catalog bridge
-│   ├── ComponentDescriptor.java         Our overlay record
-│   ├── ParameterDef.java
-│   ├── CamelCatalogLoader.java          Loads from camel-catalog artifact
-│   ├── ComponentDescriptorRegistry.java Spring bean, @PostConstruct loads all
-│   ├── CompatibilityMatrix.java         source-type × target-type rules
-│   └── overrides/                       YAML overlays for UI metadata, tiers
-│       ├── rest.yaml
-│       ├── cxf.yaml
-│       ├── jms.yaml
-│       └── ...
+│   └── com.finexatech.esb.spec/
+│       ├── RouteSpec.java               Top-level spec container
+│       ├── SourceSpec.java              type, method, path, name, auth, periodMs
+│       ├── TargetSpec.java              type, endpointUrl, operation, wsdl, timeout, retry, auth, params
+│       ├── TransformSpec.java           request + response TransformItemSpec
+│       ├── TransformItemSpec.java       type, resource, inline
+│       ├── ProcessSpec.java             sequential steps
+│       ├── StepSpec.java                set-header|log|script|route-to|split|wire-tap
+│       ├── RoutingSpec.java             content-based routing rules
+│       ├── RoutingRule.java             condition, steps, target, isDefault
+│       ├── ErrorSpec.java               deadLetter, fallbackHttpStatus, fallbackBody
+│       ├── RetrySpec.java               maxAttempts, backoffType, delays, retryOn
+│       ├── TimeoutSpec.java             connectMs, readMs
+│       ├── CorrelationSpec.java         header, generateIfMissing, propagateToTarget
+│       ├── AuthSpec.java                type, requiredRoles, username, password, apiKey
+│       ├── ExpressionSpec.java          language, value
+│       └── MetadataSpec.java            name, version, description, tags, owner
 │
 ├── esb-compiler/                     ← Validation + Assembly. Thin Spring layer.
-│   ├── validation/
-│   │   ├── SpecRule.java                interface
-│   │   ├── ValidationLayer.java         enum: STRUCTURAL|SCHEMA|SEMANTIC|COMPAT|DRY_RUN
-│   │   ├── ValidationContext.java       shared state across rules
-│   │   ├── ValidationReport.java
-│   │   ├── ValidationPipeline.java      orchestrates all rules in order
-│   │   └── rules/
-│   │       ├── structural/              RequiredFieldsRule, NameFormatRule, ...
-│   │       ├── schema/                  TypeKnownRule, RetryConfigRule, ...
-│   │       ├── semantic/                WsdlExistsRule, XsltCompilesRule, ...
-│   │       ├── compatibility/           CompatibilityMatrixRule, PathConflictRule
-│   │       └── dryrun/                  CamelDryRunRule
 │   ├── assembly/
-│   │   ├── RouteAssembler.java          THE immutable core
-│   │   ├── SourceAdapter.java           interface
-│   │   ├── TargetAdapter.java           interface
-│   │   ├── TransformAdapter.java        interface
-│   │   ├── RouteInterceptor.java        interface
-│   │   └── CamelUriBuilder.java         builds URIs from descriptor + params
-│   └── dryrun/
-│       └── CamelDryRunCompiler.java     isolated CamelContext compile check
+│   │   ├── RouteAssembler.java          Immutable core — linear routes
+│   │   ├── RouteAssemblerFacade.java    Entry point — delegates to simple or complex
+│   │   ├── ComplexRouteAssembler.java   Handles process steps + routing (EIP patterns)
+│   │   ├── SourceAdapter.java           Interface: protocol(), buildFromUri(), configure()
+│   │   ├── TargetAdapter.java           Interface: protocol(), buildToUri(), preProcessor()
+│   │   ├── TransformAdapter.java        Interface: type(), buildProcessor()
+│   │   ├── RouteInterceptor.java        Interface: order(), apply()
+│   │   ├── RouteToStepApplier.java      Applies route-to steps
+│   │   ├── SetHeaderStepApplier.java    Applies set-header steps
+│   │   ├── SplitStepApplier.java        Applies split steps
+│   │   ├── WireTapStepApplier.java      Applies wire-tap steps
+│   │   ├── LogStepApplier.java          Applies log steps
+│   │   ├── ScriptStepApplier.java       Applies script steps
+│   │   └── EsbExpressionHelper.java     Evaluates simple/groovy/jsonpath expressions
+│   ├── loader/
+│   │   └── RouteSpecParser.java         Parses YAML → RouteSpec POJOs (Jackson)
+│   └── validation/
+│       ├── ValidationPipeline.java      5-layer orchestrator
+│       ├── ValidationReport.java        {messages[], layerReached}
+│       ├── ValidationMessage.java       field, message, severity
+│       ├── ValidationLayer.java         STRUCTURAL|SCHEMA|SEMANTIC|COMPATIBILITY|DRY_RUN
+│       ├── SpecRule.java                Interface for all rules
+│       └── rules/
+│           ├── RequiredFieldsRule.java  Source/target/transform present; skips mock types
+│           ├── HttpMethodRule.java      Method in [GET, POST, PUT, DELETE, PATCH]
+│           ├── RoutingValidationRule.java  Routing rules have exactly one default
+│           └── EnvVarResolvableRule.java   ${VAR} references exist in environment
 │
 ├── esb-adapters/                     ← All adapter implementations. ADD HERE ONLY.
 │   ├── source/
-│   │   ├── RestSourceAdapter.java       T0 - core
-│   │   ├── TimerSourceAdapter.java      T2 - future
-│   │   └── MqSourceAdapter.java         T1 - future
+│   │   ├── RestSourceAdapter.java       protocol: "rest" — Camel REST DSL
+│   │   ├── DirectSourceAdapter.java     protocol: "direct" — direct:name endpoint
+│   │   └── TimerSourceAdapter.java      protocol: "timer" — fixed schedule (periodMs)
 │   ├── target/
-│   │   ├── SoapTargetAdapter.java       T0 - core (specialized, needs CXF setup)
-│   │   ├── RestTargetAdapter.java       T0 - core
-│   │   ├── JmsTargetAdapter.java        T1 - messaging
-│   │   ├── KafkaTargetAdapter.java      T1 - messaging
-│   │   ├── FixmlTargetAdapter.java      T3 - specialized
-│   │   └── FtpTargetAdapter.java        T2 - integration
+│   │   ├── SoapTargetAdapter.java       protocol: "soap" — HTTP POST + SOAPAction header
+│   │   │                                  ⚠ Must removeHeader(HTTP_PATH/URI/QUERY)
+│   │   │                                    bridgeEndpoint=true alone is NOT sufficient
+│   │   ├── RestTargetAdapter.java       protocol: "rest" — HTTP GET/POST/PUT/DELETE
+│   │   ├── HttpLoggedTargetAdapter.java protocol: "http-logged" — HTTP with logging (demo)
+│   │   ├── MockResponseTargetAdapter.java  protocol: "mock-response" — static response body
+│   │   └── MockEchoTargetAdapter.java   protocol: "mock-echo" — echoes request back
 │   ├── transform/
-│   │   ├── XsltTransformAdapter.java    T0 - core
-│   │   ├── JoltTransformAdapter.java    T0 - core
-│   │   ├── GroovyTransformAdapter.java  T1
-│   │   └── PassthroughTransformAdapter T0 - core
-│   └── interceptors/
-│       ├── CorrelationInterceptor.java  always applied, order=1
-│       ├── AuthInterceptor.java         always applied, order=2
-│       ├── RetryInterceptor.java        always applied, order=3
-│       ├── TimeoutInterceptor.java      always applied, order=4
-│       └── MetricsInterceptor.java      always applied, order=5
+│   │   ├── GroovyTransformAdapter.java  type: "groovy" — inline Groovy scripts
+│   │   │                                  ⚠ Use ${headers['key']} in GString; def creates
+│   │   │                                    local var and breaks binding
+│   │   ├── JoltTransformAdapter.java    type: "jolt" — declarative JSON→JSON transforms
+│   │   └── PassthroughTransformAdapter.java  type: "passthrough" — identity
+│   ├── interceptors/
+│   │   ├── AuditInterceptor.java        order: 1 — records start time, method, path, sourceIp
+│   │   ├── ErrorHandlingInterceptor.java  order: 10 — global exception handler
+│   │   │                                  ⚠ GAP-003: fires BEFORE RetryInterceptor
+│   │   │                                    Retry never executes. Fix: ResilienceInterceptor
+│   │   ├── RetryInterceptor.java        order: 30 — retry on transient errors (currently broken)
+│   │   └── CorrelationInterceptor.java  order: 50 — generates/propagates X-Correlation-ID
+│   └── audit/
+│       ├── AuditEvent.java              Record: id, routeName, correlationId, method, path,
+│       │                                  sourceIp, statusCode, durationMs, timestamp
+│       └── AuditStore.java              In-memory ring buffer; recent(limit), record()
 │
-├── esb-runtime/                      ← Spring Boot app. Wires everything together.
-│   ├── EsbApplication.java
-│   ├── CamelContextConfig.java          Camel + Spring Boot config
-│   ├── RouteRegistry.java               manages live routes
-│   ├── RouteSpecLoader.java             reads YAML from directory
-│   ├── HotReloadWatcher.java            WatchService → trigger reload
-│   └── ManagementController.java        /api/routes, /api/validate (Phase 2)
+├── esb-designer/                     ← Designer service. Port 9191.
+│   └── com.finexatech.esb.designer/
+│       ├── EsbDesignerApplication.java
+│       ├── api/
+│       │   ├── DesignerManagementController.java
+│       │   │     POST /manage/routes/validate
+│       │   │     POST /manage/routes/save
+│       │   │     GET  /manage/routes
+│       │   │     GET  /manage/components
+│       │   ├── TransformPreviewController.java
+│       │   │     POST /manage/transform-preview
+│       │   ├── TransformPreviewRequest.java
+│       │   ├── TransformPreviewResponse.java
+│       │   └── TransformPreviewService.java
+│       └── config/
+│           └── CorsConfig.java          CORS: allow http://localhost:3000
 │
-├── esb-observability/                ← Cross-cutting. Injected, never hardcoded.
-│   ├── CorrelationIdFilter.java         Servlet filter: MDC inject/propagate
-│   ├── CamelMetricsStrategy.java        Micrometer route timers/counters
-│   ├── StructuredLogLayout.java         Logback JSON encoder config
-│   └── HealthIndicator.java             Spring Boot actuator: route health
+├── esb-runtime/                      ← Spring Boot app. Wires everything. Port 9090.
+│   └── com.finexatech.esb/
+│       ├── EsbApplication.java          @SpringBootApplication, port 9090
+│       ├── api/
+│       │   ├── RouteManagementController.java   Full route lifecycle (see §11)
+│       │   └── AuditController.java             GET /manage/audit?limit=50
+│       ├── config/
+│       │   ├── CamelRestConfig.java             REST DSL, Camel servlet /api/*
+│       │   └── CorsConfig.java                  CORS: allow http://localhost:3000
+│       ├── init/
+│       │   └── InitRuntimeBanner.java           Startup banner (@Profile("init"))
+│       ├── loader/
+│       │   ├── RouteSpecLoader.java             Loads routes on startup (classpath + filesystem)
+│       │   └── HotReloadWatcher.java            WatchService monitors routes directory
+│       ├── mock/
+│       │   └── MockSoapController.java          Mock SOAP endpoint (@Profile("demo"))
+│       └── registry/
+│           └── LiveRouteRegistry.java           route lifecycle: register/suspend/resume/deregister
 │
-└── esb-api/                          ← Phase 2+. Management REST API.
-    └── (placeholder)
+├── mock-bank-service/                ← Standalone mock SOAP bank. Port 8080.
+│   └── com.finexatech.mock.bank/
+│       ├── MockBankApplication.java     @SpringBootApplication, port 8080
+│       ├── BankSoapController.java      POST /soap/balance-service
+│       │                                  GetAccountBalance SOAP operation
+│       ├── AccountRegistry.java         In-memory account data (ACC001, ACC002, …)
+│       └── StartupBanner.java           ASCII art startup banner
+│
+└── esb-ui/                           ← React + Vite + TypeScript + Tailwind. Port 3000.
+    ├── src/
+    │   ├── pages/
+    │   │   ├── DashboardPage.tsx         Route counts, stats (Started/Stopped/Suspended)
+    │   │   ├── RoutesPage.tsx            Route list: start/stop/delete/reload per route
+    │   │   ├── RouteBuilderPage.tsx      React Flow canvas: drag-drop + live YAML editor
+    │   │   ├── ValidationPage.tsx        Multi-layer validation results display
+    │   │   ├── AuditPage.tsx             Audit trail: status badges, duration, sourceIp
+    │   │   └── MonitoringPage.tsx        (placeholder)
+    │   ├── components/
+    │   │   ├── layout/
+    │   │   │   ├── Layout.tsx, NavBar.tsx, TopBar.tsx
+    │   │   ├── ui/
+    │   │   │   ├── Card.tsx, Badge.tsx, StatusBadge.tsx, Button.tsx
+    │   │   │   ├── Modal.tsx, Toast.tsx
+    │   │   └── route-builder/
+    │   │       ├── CodeEditorModal.tsx        Monaco editor (Groovy / XSLT)
+    │   │       ├── JoltFieldMapperModal.tsx   Visual Jolt field mapper
+    │   │       └── GroovySoapMapperModal.tsx  SOAP→REST Groovy mapper
+    │   ├── hooks/
+    │   │   ├── useRoutes.ts              Fetch routes + lifecycle actions
+    │   │   ├── useToast.ts               Toast notification state
+    │   │   └── useTransformPreview.ts    Call transform-preview API
+    │   ├── api/
+    │   │   └── esb-api.ts               Axios client for /manage/* endpoints
+    │   └── types/
+    │       └── index.ts                 TypeScript interfaces (RouteSpec, AuditEvent, …)
+    └── .env.designer                    VITE_DESIGNER_URL + VITE_RUNTIME_URL
 ```
 
 ---
 
-## 5. Component Registry Design
-
-### How It Works
-
-```
-startup
-   │
-   ├─ CamelCatalogLoader.load()
-   │    ├─ catalog.findComponentNames()     → [ "cxf", "jms", "kafka", "ftp", ... ]
-   │    ├─ for each: catalog.componentJson() → raw Camel JSON
-   │    └─ parse → CamelComponentDescriptor (Camel's own model)
-   │
-   ├─ OverlayLoader.load("classpath:components/overrides/*.yaml")
-   │    └─ our metadata: displayName, tier, uiIcon, uiColor, validationRules
-   │
-   ├─ merge → ComponentDescriptor (our unified model)
-   │
-   └─ ComponentDescriptorRegistry populated
-        ├─ indexed by scheme:    "cxf", "jms", "kafka"
-        ├─ indexed by role:      SOURCE, TARGET, BOTH
-        └─ indexed by tier:      T0, T1, T2, T3, T4
-```
-
-### ComponentDescriptor (our model over Camel's catalog)
-
-```java
-public record ComponentDescriptor(
-    // from Camel catalog
-    String scheme,               // "cxf", "jms", "kafka", "ftp"
-    String title,                // "CXF (SOAP)", "JMS", "Kafka"
-    String description,
-    List<ParameterDef> params,   // all URI + component params from catalog
-
-    // our overlay
-    ComponentRole role,          // SOURCE, TARGET, BOTH
-    ComponentTier tier,          // T0_CORE, T1_MESSAGING, T2_INTEGRATION, T3_SPECIALIZED
-    String uiIcon,               // icon name for drag-drop UI
-    String uiColor,              // node color in canvas
-    String uriTemplate,          // how to build URI from user params
-    List<String> requiredParams, // subset of params that must be set
-    List<String> uiVisibleParams // which params to show in property panel
-) {}
-
-public record ParameterDef(
-    String name,
-    String type,          // string | integer | boolean | duration | enum
-    String defaultValue,
-    boolean required,
-    boolean secret,       // mask in UI, never log
-    String description,
-    List<String> enumValues  // for enum type
-) {}
-```
-
-### The Override YAML (our metadata layer)
-
-```yaml
-# components/overrides/cxf.yaml
-scheme: cxf
-role: TARGET
-tier: T0_CORE
-displayName: "SOAP / CXF"
-uiIcon: "soap-icon"
-uiColor: "#4A90D9"
-uriTemplate: "cxf:{endpointAddress}?serviceClass={serviceClass}&wsdlURL={wsdlURL}"
-requiredParams:
-  - endpointAddress
-  - wsdlURL
-  - operationName
-uiVisibleParams:
-  - endpointAddress
-  - wsdlURL
-  - operationName
-  - serviceName
-  - portName
-validationRules:
-  - WsdlExistsRule
-  - WsdlOperationExistsRule
-  - SoapAuthConfigRule
-```
-
-```yaml
-# components/overrides/jms.yaml
-scheme: jms
-role: BOTH                # can be source or target
-tier: T1_MESSAGING
-displayName: "JMS / ActiveMQ"
-uiIcon: "mq-icon"
-uiColor: "#F5A623"
-uriTemplate: "jms:{destinationType}:{destinationName}"
-requiredParams:
-  - destinationName
-uiVisibleParams:
-  - destinationType      # queue | topic
-  - destinationName
-  - concurrentConsumers
-  - acknowledgementMode
-validationRules:
-  - JmsBrokerReachableRule
-  - JmsDestinationFormatRule
-```
-
----
-
-## 6. Three-Tier Adapter Model
+## 5. Three-Tier Adapter Model
 
 Not all components need the same level of custom code. Three tiers of adapter:
 
@@ -412,292 +378,166 @@ Not all components need the same level of custom code. Three tiers of adapter:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    ADAPTER TIERS                                    │
 │                                                                     │
-│  Tier A: GenericCamelAdapter                                        │
+│  Tier A: GenericCamelAdapter  (future — not yet implemented)        │
 │  ────────────────────────────                                       │
 │  Works for 80%+ of Camel components.                                │
 │  Uses ComponentDescriptor to build URI + pre/post processors.       │
 │  Zero custom code needed. Just add an override YAML.                │
 │  Examples: HTTP, FTP, File, Timer, Quartz, SFTP                     │
 │                                                                     │
-│  Tier B: SpecializedAdapter extends GenericCamelAdapter             │
+│  Tier B: SpecializedAdapter implements TargetAdapter directly       │
 │  ──────────────────────────────────────────────────────             │
-│  Overrides specific hooks for complex protocols.                    │
-│  Examples: CXF/SOAP (WSDL proxy gen), Kafka (schema registry),      │
-│            REST DSL (Spring Boot REST config)                        │
+│  Full custom implementation for complex protocols.                  │
+│  Examples: SoapTargetAdapter, RestTargetAdapter,                    │
+│            HttpLoggedTargetAdapter                                  │
 │                                                                     │
-│  Tier C: CustomProtocolAdapter implements TargetAdapter             │
-│  ──────────────────────────────────────────────────────             │
-│  Full custom implementation for proprietary protocols.              │
-│  Examples: FIXML (FIX engine session), Bloomberg API, SAP RFC        │
+│  Tier C: MockAdapter  (demo/testing only — internal)                │
+│  ──────────────────────────────────────────────────                 │
+│  Static responses or echo for integration demos.                    │
+│  Examples: MockResponseTargetAdapter, MockEchoTargetAdapter         │
+│  Note: hidden from public palette via isInternal() in future        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Tier A: GenericCamelAdapter (the default, covers most cases)
+### Implemented Adapters
 
-```java
-// esb-adapters/target/GenericCamelTargetAdapter.java
-@Component
-public class GenericCamelTargetAdapter implements TargetAdapter {
+#### Source Adapters
+| Protocol | Class | Notes |
+|---|---|---|
+| `rest` | RestSourceAdapter | Camel REST DSL; GET/POST/PUT/DELETE; path params; consumes/produces |
+| `direct` | DirectSourceAdapter | `direct:name` endpoint; programmatic invocation |
+| `timer` | TimerSourceAdapter | Fixed schedule polling; periodMs defaults to 5000 |
 
-    private final ComponentDescriptorRegistry registry;
-    private final CamelUriBuilder uriBuilder;
-    private final EnvVarResolver envResolver;
+#### Target Adapters
+| Protocol | Class | Notes |
+|---|---|---|
+| `soap` | SoapTargetAdapter | HTTP POST + SOAPAction; must `removeHeader(HTTP_PATH/URI/QUERY)`; basic auth |
+| `rest` | RestTargetAdapter | HTTP GET/POST/PUT/DELETE; timeout; auth |
+| `http-logged` | HttpLoggedTargetAdapter | HTTP with structured logging (demo only) |
+| `mock-response` | MockResponseTargetAdapter | Static body + status code (demo/test only) |
+| `mock-echo` | MockEchoTargetAdapter | Echoes request back (demo/test only) |
 
-    @Override
-    public boolean supports(TargetSpec spec) {
-        ComponentDescriptor desc = registry.get(spec.type());
-        // Generic adapter handles it IF no specialized adapter is registered
-        return desc != null && !hasSpecializedAdapter(spec.type());
-    }
+#### Transform Adapters
+| Type | Class | Notes |
+|---|---|---|
+| `groovy` | GroovyTransformAdapter | Inline Groovy; `body`, `headers`, `exchange` in scope |
+| `jolt` | JoltTransformAdapter | Declarative JSON→JSON; classpath or inline spec |
+| `passthrough` | PassthroughTransformAdapter | Identity — no transformation |
 
-    @Override
-    public String buildToUri(TargetSpec spec) {
-        ComponentDescriptor desc = registry.get(spec.type());
-        Map<String, String> resolvedParams = envResolver.resolve(spec.params());
-        return uriBuilder.build(desc.uriTemplate(), resolvedParams);
-    }
+### Adapter Registration
 
-    @Override
-    public Processor preProcessor(TargetSpec spec) {
-        // Generic: set content-type header based on component's expected format
-        return exchange -> {
-            ComponentDescriptor desc = registry.get(spec.type());
-            exchange.getIn().setHeader("Content-Type", desc.defaultContentType());
-        };
-    }
-
-    @Override
-    public Processor postProcessor(TargetSpec spec) {
-        return exchange -> { /* generic passthrough */ };
-    }
-}
-```
-
-### Tier B: SpecializedAdapter (for complex protocols)
-
-```java
-// Only override what's different. Everything else comes from Generic.
-@Component
-@Primary // takes priority over GenericCamelTargetAdapter for "soap"
-public class SoapTargetAdapter extends GenericCamelTargetAdapter {
-
-    @Override
-    public boolean supports(TargetSpec spec) {
-        return "soap".equals(spec.type());
-    }
-
-    @Override
-    public String buildToUri(TargetSpec spec) {
-        // CXF URI has specific structure that generic builder can't handle
-        return String.format("cxf:%s?wsdlURL=%s&serviceClass=%s&operationName=%s",
-            envResolver.resolve(spec.endpoint()),
-            spec.wsdl(),
-            generateProxyClass(spec),   // CXF-specific: generate from WSDL
-            spec.operation()
-        );
-    }
-
-    @Override
-    public Processor preProcessor(TargetSpec spec) {
-        return exchange -> {
-            // CXF-specific: set operation name header
-            exchange.getIn().setHeader(CxfConstants.OPERATION_NAME, spec.operation());
-            exchange.getIn().setHeader(CxfConstants.OPERATION_NAMESPACE, spec.namespace());
-            // SOAP auth header
-            if (spec.auth() != null) applySoapAuth(exchange, spec.auth());
-        };
-    }
-
-    private String generateProxyClass(TargetSpec spec) {
-        // Use CXF wsdl2java to generate proxy, cache result
-        return wsdlProxyCache.getOrGenerate(spec.wsdl(), spec.service());
-    }
-}
-```
-
-### Tier C: CustomProtocolAdapter (proprietary protocols)
-
-```java
-// For protocols Camel doesn't natively support
-@Component
-public class FixmlTargetAdapter implements TargetAdapter {
-
-    @Override
-    public boolean supports(TargetSpec spec) { return "fixml".equals(spec.type()); }
-
-    @Override
-    public String buildToUri(TargetSpec spec) {
-        // Could use Camel's netty component as transport,
-        // or a custom component registered under "fixml" scheme
-        return "netty:tcp://" + spec.endpoint()
-            + "?encoders=#fixmlEncoder&decoders=#fixmlDecoder";
-    }
-
-    @Override
-    public Processor preProcessor(TargetSpec spec) {
-        return exchange -> {
-            // FIX session headers, sequence numbers, sender/target comp IDs
-            exchange.getIn().setHeader("FIX.SenderCompID", spec.param("senderCompId"));
-            exchange.getIn().setHeader("FIX.TargetCompID", spec.param("targetCompId"));
-        };
-    }
-
-    @Override
-    public Processor postProcessor(TargetSpec spec) {
-        return exchange -> {
-            // Parse FIXML ACK/NAK, map to internal response model
-        };
-    }
-}
-```
-
-### Adapter Resolution Order (no conflict, no mess)
+All adapters are Spring `@Component` beans. `RouteAssemblerFacade` resolves the right
+adapter by matching `spec.source().type()` / `spec.target().type()` / `spec.transform().*.type()`
+against the registered beans. No manual registration required — Spring component scan handles it.
 
 ```
-RouteAssembler needs a TargetAdapter for type="soap"
-
-1. Look for @Primary adapter that supports("soap")   → SoapTargetAdapter  ✓ found, use it
-2. Look for @Primary adapter that supports("jms")    → not found
-3. Fall back to GenericCamelTargetAdapter.supports() → true, use it
-4. If GenericCamelTargetAdapter doesn't support it   → throw RouteConfigException
-   "No adapter found for target type: 'fixml'. Register a FixmlTargetAdapter."
+RouteAssemblerFacade.assemble(spec)
+  │
+  ├─ Has process steps or routing?
+  │    YES → ComplexRouteAssembler.assemble(spec)
+  │    NO  → RouteAssembler.assemble(spec)
+  │
+  └─ RouteAssembler.assemble(spec)
+       ├─ resolve SourceAdapter  by spec.source().type()
+       ├─ resolve TargetAdapter  by spec.target().type()
+       ├─ resolve TransformAdapter(request) by spec.transform().request().type()
+       ├─ resolve TransformAdapter(response) by spec.transform().response().type()
+       └─ build RouteBuilder:
+            interceptors → from(source) → transform(req) → preProcessor → to(target)
+                         → postProcessor → transform(resp)
 ```
 
 ---
 
-## 7. Component Tier Rollout Strategy
+## 6. Component Tier Rollout Strategy
 
-Implement in tiers. Each tier is a complete, shippable increment. Never implement
-partial tiers.
+Implement in tiers. Each tier is a complete, shippable increment.
 
 ```
-T0 — CORE (Phase 1, Weeks 1-3)
+T0 — CORE  ✓ COMPLETE
 ────────────────────────────────
-Source:    REST (HTTP inbound via Camel REST DSL)
-Target:    SOAP/CXF, REST/HTTP
-Transform: XSLT, Jolt, Passthrough
-Routing:   Linear (from → transform → to)
-Goal:      REST→SOAP works end to end. One real integration live.
+Source:    rest, direct, timer
+Target:    soap, rest, http-logged
+Transform: jolt, groovy, passthrough
+Routing:   linear + content-based router + process steps (EIP)
+Goal:      REST→SOAP works end to end. Live demo ready.
 
-T1 — MESSAGING (Phase 2, Month 2)
+T1 — MESSAGING (Phase 3)
 ───────────────────────────────────
 Source:    JMS (ActiveMQ/Artemis), Kafka
 Target:    JMS, Kafka, RabbitMQ
-Routing:   Content-Based Router (choice()), Message Filter
-Goal:      Async messaging patterns work. Dead letter queues live.
+Routing:   Message Filter, Dead Letter Channel
+Goal:      Async messaging patterns work.
 
-T2 — INTEGRATION (Phase 2, Month 3)
+T2 — INTEGRATION (Phase 3)
 ─────────────────────────────────────
-Source:    Timer/Quartz (scheduled), File, SFTP
-Target:    FTP/SFTP, File, SMTP (email notifications)
-Target:    REST (HTTP outbound) — generic HTTP calls to any REST API
+Source:    File, SFTP
+Target:    FTP/SFTP, File, SMTP
 Routing:   Splitter, Aggregator, Wire Tap
-Goal:      Batch/scheduled patterns work. File-based integrations live.
+Goal:      Batch/scheduled patterns work.
 
-T3 — SPECIALIZED (Phase 3, per demand)
+T3 — SPECIALIZED (per demand)
 ────────────────────────────────────────
-Source/Target: FIXML, FIX protocol (QuickFIX/J + Camel)
-Target:        JDBC (database write), JPA
-Target:        gRPC (with Camel gRPC component)
-Target:        SAP RFC (Camel SAP component)
+Source/Target: FIXML, FIX protocol
+Target:        JDBC, JPA, gRPC, SAP RFC
 Routing:       Dynamic Router, Recipient List
-Goal:          Domain-specific protocols live. Driven by project needs.
+Goal:          Domain-specific protocols. Demand-driven.
 
 T4 — COMMUNITY (on demand)
 ───────────────────────────
-Any Camel community component
-Add via: 1 override YAML + 1 optional adapter class
-GenericCamelAdapter handles most without any code.
+Any Camel community component.
+Add via: 1 adapter class + optional override YAML.
 ```
 
 ### Adding Tiers Without Breaking Anything
 
 ```
-When T1 (Messaging) is ready to implement:
+When T1 (Messaging) is ready:
 
-1. Add Maven dependency for camel-jms to esb-adapters/pom.xml
-2. Add components/overrides/jms.yaml  (metadata overlay)
-3. Add JmsTargetAdapter.java          (or rely on GenericCamelAdapter)
-4. Add JmsSourceAdapter.java          (or rely on GenericCamelAdapter)
-5. Add JmsBrokerReachableRule.java    (semantic validation)
-6. Update CompatibilityMatrix          (jms ↔ rest, jms ↔ soap, etc.)
+1. Add camel-jms dependency to esb-adapters/pom.xml
+2. Add JmsTargetAdapter.java  (implements TargetAdapter)
+3. Add JmsSourceAdapter.java  (implements SourceAdapter)
+4. Add JmsBrokerReachableRule.java  (semantic validation)
+5. Update CompatibilityMatrix
 
-Files changed in CORE: ZERO
 Files changed in esb-compiler: ZERO
-Files changed in esb-runtime: ZERO
+Files changed in esb-runtime:  ZERO
 ```
 
 ---
 
-## 8. RouteAssembler — The Immutable Core
+## 7. RouteAssembler — The Immutable Core
 
-This class must never be modified after it is written. All extension happens in adapters.
+The `RouteAssembler` (and `ComplexRouteAssembler`) must never be modified after they
+are written. All extension happens in adapters. Use `RouteAssemblerFacade` everywhere.
 
 ```java
-@Component
-public class RouteAssembler {
+// Always inject this — never RouteAssembler directly
+@Autowired
+private RouteAssemblerFacade assemblerFacade;
 
-    // All populated by Spring component scan — auto-discovers new adapters
-    private final Map<String, SourceAdapter>    sourceAdapters;
-    private final Map<String, TargetAdapter>    targetAdapters;
-    private final Map<String, TransformAdapter> transformAdapters;
-    private final List<RouteInterceptor>        interceptors;    // sorted by order()
+// Facade delegates automatically:
+RouteBuilder rb = assemblerFacade.assemble(spec);
+camelContext.addRoutes(rb);
+```
 
-    // Entry point — only public method needed
-    public RouteBuilder assemble(RouteSpec spec) {
-        SourceAdapter    src    = resolve(sourceAdapters,    spec.source().type(),   "source");
-        TargetAdapter    tgt    = resolve(targetAdapters,    spec.target().type(),   "target");
-        TransformAdapter reqTx  = resolve(transformAdapters, spec.transform().request().type(),  "transform");
-        TransformAdapter resTx  = resolve(transformAdapters, spec.transform().response().type(), "transform");
+### ComplexRouteAssembler (EIP Patterns)
 
-        return new RouteBuilder() {
-            @Override
-            public void configure() {
-                // Step 1: apply interceptors (error handling, retry, auth, metrics)
-                interceptors.forEach(i -> i.apply(this, spec));
+Handles routes with `process` steps or `routing` blocks:
 
-                // Step 2: build route — always the same shape
-                RouteDefinition route = from(src.buildFromUri(spec.source()))
-                    .routeId(spec.name())
-                    .process(reqTx.buildProcessor(spec.transform().request()))
-                    .process(tgt.preProcessor(spec.target()))
-                    .to(tgt.buildToUri(spec.target()))
-                    .process(tgt.postProcessor(spec.target()))
-                    .process(resTx.buildProcessor(spec.transform().response()));
-
-                // Step 3: let source do any extra DSL setup (REST verb, path params)
-                src.configure(route, spec.source());
-
-                // Step 4: wire content-based routing if spec has it
-                if (spec.routing() != null) {
-                    applyRouting(route, spec.routing());
-                }
-            }
-        };
-    }
-
-    private void applyRouting(RouteDefinition route, RoutingSpec routing) {
-        switch (routing.type()) {
-            case CONTENT_BASED -> applyChoiceRouter(route, routing);
-            case SPLITTER      -> applySplitter(route, routing);
-            case AGGREGATOR    -> applyAggregator(route, routing);
-            // new routing patterns added here ONLY — assembler still never changes structure
-        }
-    }
-
-    private <T> T resolve(Map<String, T> registry, String type, String role) {
-        T adapter = registry.get(type);
-        if (adapter == null) throw new RouteConfigException(
-            "No %s adapter for type '%s'. Available: %s".formatted(
-                role, type, registry.keySet()));
-        return adapter;
-    }
-}
+```java
+// Step types handled by ComplexRouteAssembler
+"set-header"  → SetHeaderStepApplier   (set exchange header from expression)
+"log"         → LogStepApplier         (log message at specified level)
+"script"      → ScriptStepApplier      (execute inline Groovy/expression)
+"route-to"    → RouteToStepApplier     (branch to direct: endpoint)
+"split"       → SplitStepApplier       (split body; parallelProcessing; timeout)
+"wire-tap"    → WireTapStepApplier     (fire-and-forget to destination)
 ```
 
 ---
 
-## 9. RouteSpec YAML Reference
+## 8. RouteSpec YAML Reference
 
 ### Complete Schema
 
@@ -707,38 +547,30 @@ apiVersion: esb/v1
 kind: RouteSpec
 
 metadata:
-  name: order-submit                 # kebab-case, unique across all routes
-  version: "1.0"                     # semver for your own tracking
-  description: "POST /orders → FIXML NewOrderSingle"
-  tags: [trading, orders]            # for filtering in UI / catalog
-  owner: trading-team                # for governance
+  name: bank-balance-lookup          # kebab-case, unique across all routes
+  version: "1.0"
+  description: "POST /api/balance → SOAP GetAccountBalance"
+  tags: [banking, soap]
+  owner: integration-team
 
 # ── SOURCE (inbound endpoint) ─────────────────────────────────────────
 source:
-  type: rest                         # rest | timer | jms | kafka | file | grpc
+  type: rest                         # rest | direct | timer
   method: POST                       # GET | POST | PUT | DELETE | PATCH
-  path: /api/v1/orders
+  path: /balance                     # NOTE: no /api prefix — Camel adds /api/*
   consumes: application/json
   produces: application/json
   auth:
-    type: jwt                        # jwt | basic | api-key | none
-    requiredRoles: [ROLE_TRADER]
-  validation:
-    bodySchema: classpath:schema/order-request.json
-    pathParams:
-      id: { type: string, pattern: "^[A-Z0-9]{8}$" }
-    headers:
-      X-Account-Id: { required: true }
+    type: none                       # jwt | basic | api-key | none
+    requiredRoles: [ROLE_USER]       # (parsed but NOT enforced — decorative only)
+  periodMs: 5000                     # timer only
 
 # ── TARGET (outbound call) ────────────────────────────────────────────
 target:
-  type: soap                         # soap | fixml | jms | kafka | rest | ftp | file
-  # --- SOAP-specific ---
-  wsdl: classpath:wsdl/OrderService.wsdl
-  service: OrderService
-  port: OrderServicePort
-  operation: SubmitOrder
-  endpointUrl: "${SOAP_ORDER_URL}"   # ALWAYS env var, never hardcoded
+  type: soap                         # soap | rest | http-logged | mock-response | mock-echo
+  endpointUrl: "${SOAP_BANK_URL}"    # ALWAYS env var; never hardcoded
+  operation: GetAccountBalance       # SOAP operation name (SOAPAction header)
+  wsdl: classpath:wsdl/bank.wsdl    # optional
   auth:
     type: basic
     username: "${SOAP_USER}"
@@ -752,466 +584,649 @@ target:
     initialDelayMs: 1000
     multiplier: 2.0
     maxDelayMs: 30000
-    retryOn: [CONNECTION_REFUSED, HTTP_503, HTTP_502, TIMEOUT]
-    doNotRetryOn: [HTTP_400, HTTP_401, HTTP_403]  # don't retry client errors
+    retryOn: [CONNECTION_REFUSED, HTTP_503, TIMEOUT]
+    doNotRetryOn: [HTTP_400, HTTP_401, HTTP_403]
+  # mock-response fields:
+  mockBody: '{"status":"ok"}'
+  mockStatusCode: 200
+  params:
+    key: value                       # component-specific extra params
 
 # ── TRANSFORMS ────────────────────────────────────────────────────────
 transform:
   request:
-    type: xslt                       # xslt | jolt | groovy | jsonata | passthrough
-    resource: classpath:xslt/order-to-soap.xslt
-    # optional: for groovy/script transforms
-    # script: |
-    #   def body = request.body
-    #   ...
+    type: groovy                     # jolt | groovy | passthrough
+    inline: |
+      def acct = body.accountNumber
+      body = "<soap:Envelope ...><acct>${acct}</acct></soap:Envelope>"
   response:
     type: jolt
-    resource: classpath:jolt/soap-to-order-response.json
+    resource: classpath:jolt/balance-response.json
+    # inline: '[{"operation":"shift","spec":{...}}]'
+
+# ── PROCESS STEPS (optional, runs before target) ──────────────────────
+process:
+  steps:
+    - id: set-correlation
+      type: set-header
+      name: X-Request-Source
+      expression:
+        language: constant
+        value: "esb-runtime"
+    - id: log-request
+      type: log
+      message: "Processing balance request for ${body.accountNumber}"
+      level: INFO
+    - id: enrich
+      type: script
+      language: groovy
+      inline: |
+        headers['X-Timestamp'] = new Date().toInstant().toString()
 
 # ── CONTENT-BASED ROUTING (optional) ─────────────────────────────────
 routing:
-  type: content-based                # content-based | splitter | aggregator | wire-tap
-  expressionLanguage: simple         # simple | xpath | jsonpath | groovy
+  type: content-based
   rules:
-    - id: large-order
-      condition: "${body.quantity} > 10000"
+    - id: vip-account
+      condition:
+        language: jsonpath
+        value: "$.accountType == 'VIP'"
       target:
-        type: jms
-        destination: "queue.large-orders"
-        endpointUrl: "${JMS_URL}"
-      transform:
-        response:
-          type: passthrough
-    - id: standard                   # MUST have exactly one default: true
-      default: true
+        type: soap
+        endpointUrl: "${VIP_SOAP_URL}"
+        operation: GetPremiumBalance
+    - id: standard
+      isDefault: true
       target:
-        type: fixml
-        endpointUrl: "${FIXML_HOST}"
-      transform:
-        response:
-          type: xslt
-          resource: classpath:xslt/fixml-ack-to-json.xslt
+        type: soap
+        endpointUrl: "${SOAP_BANK_URL}"
+        operation: GetAccountBalance
 
 # ── ERROR HANDLING ────────────────────────────────────────────────────
 errorHandling:
   deadLetter: direct:global-error-handler
-  fallback:
-    httpStatus: 503
-    contentType: application/json
-    body: '{"code":"SERVICE_UNAVAILABLE","message":"Please retry later"}'
-  onSoapFault:
-    httpStatus: 502
-    mapFaultCode: true               # extract SOAP fault code into response
+  fallbackHttpStatus: 503
+  fallbackBody: '{"code":"SERVICE_UNAVAILABLE","message":"Please retry later"}'
 
 # ── OBSERVABILITY ─────────────────────────────────────────────────────
 correlation:
   header: X-Correlation-ID
   generateIfMissing: true
-  propagateToTarget: true            # forward to downstream SOAP/REST calls
+  propagateToTarget: true
+```
 
-logging:
-  logBody: false                     # NEVER true in production for PII routes
-  logHeaders: true
-  maskHeaders: [Authorization, X-Api-Key]
-  level: INFO
+### YAML Path Rules
 
-metrics:
-  enabled: true
-  tags:
-    domain: trading
-    operation: order-submit
-    tier: external
+```
+⚠ IMPORTANT: Route YAML paths must NOT include the /api prefix.
+             Camel REST DSL + CamelRestConfig maps servlet to /api/*.
+             What you write in YAML → What the caller hits:
+               path: /balance       →  POST http://host:9090/api/balance
+               path: /v1/customers  →  GET  http://host:9090/api/v1/customers
 ```
 
 ---
 
-## 10. Validation Architecture — 5 Layers
+## 9. Validation Architecture — 5 Layers
 
 ### The Pipeline
 
 ```java
-public class ValidationPipeline {
-
-    private final List<SpecRule> rules;   // all rules injected by Spring
-
-    public ValidationReport validate(RouteSpec spec, ValidationLayer upTo) {
-        ValidationContext ctx = new ValidationContext(
-            adapterRegistry, env, liveRouteRegistry
-        );
-
-        List<ValidationMessage> messages = new ArrayList<>();
-        boolean canProceed = true;
-
-        for (ValidationLayer layer : ValidationLayer.values()) {
-            if (layer.ordinal() > upTo.ordinal()) break;
-            if (!canProceed) break;   // stop at first ERROR layer
-
-            List<SpecRule> layerRules = rules.stream()
-                .filter(r -> r.layer() == layer && r.appliesTo(spec))
-                .toList();
-
-            for (SpecRule rule : layerRules) {
-                ValidationResult result = rule.check(spec, ctx);
-                messages.addAll(result.messages());
-                if (result.hasFatalError()) { canProceed = false; break; }
-            }
-        }
-
-        return ValidationReport.of(spec.name(), messages, upTo);
-    }
-}
+// ValidationPipeline runs rules layer by layer, stopping at first ERROR
+ValidationReport report = pipeline.validate(spec, ValidationLayer.DRY_RUN);
+// report.getMessages()     — all messages across layers
+// report.getLayerReached() — how far validation got
 ```
 
 ### All Rules by Layer
 
 ```
-L1 STRUCTURAL (client-side + server, < 10ms)
-  NameFormatRule            name is kebab-case, 1-64 chars, unique in file
+L1 STRUCTURAL (< 10ms — runs client-side + server)
   RequiredFieldsRule        source, target, transform present
+                            (skips endpointUrl check for mock-response and mock-echo)
   HttpMethodRule            method in [GET, POST, PUT, DELETE, PATCH]
+  RoutingValidationRule     content-based routing has exactly one default branch
   RetryConfigRule           maxAttempts 1–10, delays positive integers
   TimeoutRule               connectMs < readMs, both > 0
-  RoutingDefaultRule        content-based routing has exactly one default branch
 
-L2 SCHEMA (server, < 10ms)
-  SourceTypeKnownRule       type is in ComponentDescriptorRegistry
-  TargetTypeKnownRule       type is in ComponentDescriptorRegistry
-  TransformTypeKnownRule    type in [xslt, jolt, groovy, jsonata, passthrough]
-  EnumValuesRule            all enum fields match allowed values from descriptor
+L2 SCHEMA (< 10ms — server only)
+  SourceTypeKnownRule       type is a registered SourceAdapter.protocol()
+  TargetTypeKnownRule       type is a registered TargetAdapter.protocol()
+  TransformTypeKnownRule    type in [jolt, groovy, passthrough]
+  EnumValuesRule            enum fields match adapter-reported values
   ConditionSyntaxRule       routing condition expressions parse without error
 
-L3 SEMANTIC (server, 100ms–2s, results cached)
+L3 SEMANTIC (100ms–2s — results cached)
   WsdlExistsRule            wsdl file/URL loads and is valid XML
   WsdlOperationExistsRule   operation name exists in WSDL port
-  XsltCompilesRule          XSLT file loads and Saxon compiles it
-  XsltSchemaCompatRule      XSLT input namespace matches WSDL schema namespace
   JoltSpecValidRule         Jolt spec JSON is valid and parses
   EnvVarResolvableRule      all ${VAR} references exist in environment/config
-  AuthResourceRule          JWT: issuer set. Basic: credentials set.
-  TransformResourceRule     all resource: classpath:... files exist
+  TransformResourceRule     all resource: classpath:... files exist on classpath
 
-L4 COMPATIBILITY (server, < 50ms)
+L4 COMPATIBILITY (< 50ms — server only)
   SourceTargetCompatRule    compatibility matrix check
   TransformFormatRule       if target=soap, request transform output must be XML
-  AuthPropagationRule       if source needs auth, target auth configured
   PathConflictRule          no two live routes on same method+path
   RoutingBranchCompatRule   each routing branch passes SourceTargetCompatRule
 
-L5 DRY_RUN (server, 1–5s)
-  CamelDryRunRule           builds route in isolated CamelContext
-                            catches: bad URIs, missing beans, circular routes,
-                                     invalid expressions, component errors
+L5 DRY_RUN (1–5s — server only)
+  CamelDryRunRule           builds route in isolated CamelContext with mock components
+                            catches: bad URIs, missing beans, invalid expressions
 ```
 
-### DryRun Compiler Detail
+### ValidationReport Response Format
+
+```json
+{
+  "specName": "bank-balance-lookup",
+  "layerReached": "DRY_RUN",
+  "passed": false,
+  "messages": [
+    {
+      "layer": "SEMANTIC",
+      "field": "target.operation",
+      "message": "Operation 'GetBalance' not found. Available: [GetAccountBalance, GetHistory]",
+      "severity": "ERROR"
+    },
+    {
+      "layer": "COMPATIBILITY",
+      "message": "SOAP_FAULT not in retryOn list. Add if your operation is idempotent.",
+      "severity": "WARNING"
+    }
+  ]
+}
+```
+
+> Note: The UI normalizes this via `normalizeValidationResponse()` — backend returns
+> `{ messages[], layerReached }` not `{ layers[] }`.
+
+---
+
+## 10. Interceptor Chain
+
+Interceptors are applied to every route in `order()` sequence. All implement `RouteInterceptor`.
+
+| Order | Class | Status | Description |
+|---|---|---|---|
+| 1 | AuditInterceptor | ✓ EXISTS | Records method, path, sourceIp at start; writes AuditEvent on completion |
+| 5 | AuthInterceptor | TODO Phase 3 | AuthSpec is parsed but NOT enforced; currently decorative only |
+| 6 | IdempotentConsumerInterceptor | TODO Phase 3 | Idempotent consumer with configurable key expression |
+| 8 | RateLimitInterceptor | TODO Phase 3 | Token bucket per route; configurable burst |
+| 10 | ErrorHandlingInterceptor | ✓ EXISTS ⚠ | Global exception handler — see GAP-003 below |
+| 30 | RetryInterceptor | ✓ EXISTS ⚠ | Retry on transient errors — currently broken by GAP-003 |
+| 50 | CorrelationInterceptor | ✓ EXISTS | Generates/propagates X-Correlation-ID; sets MDC |
+
+### GAP-003 — Critical Interceptor Bug
+
+```
+BUG: ErrorHandlingInterceptor (order=10) catch-all fires BEFORE RetryInterceptor (order=30).
+     RetryInterceptor NEVER executes — errors are swallowed by ErrorHandlingInterceptor first.
+
+FIX: Replace ErrorHandlingInterceptor + RetryInterceptor with a single ResilienceInterceptor
+     (order=10) that handles the correct exception hierarchy:
+       transient (ConnectException, SocketTimeoutException, HTTP 5xx) → retry with backoff
+       permanent (HTTP 4xx, validation errors) → immediate dead-letter + fallback response
+```
+
+### AuditStore
+
+`AuditStore` is an in-memory ring buffer injected into `AuditInterceptor`. Each
+`AuditEvent` captures:
 
 ```java
-@Component
-public class CamelDryRunCompiler {
+record AuditEvent(
+    String id,             // UUID
+    String routeName,
+    String correlationId,  // X-Correlation-ID if present
+    String method,         // HTTP method
+    String path,           // request path
+    String sourceIp,       // caller IP
+    int    statusCode,     // response status
+    long   durationMs,     // total route execution time
+    Instant timestamp
+)
+```
 
-    public DryRunResult compile(RouteSpec spec) {
-        DefaultCamelContext dryCtx = new DefaultCamelContext();
-        dryCtx.setAutoStartup(false);    // never actually starts
-        dryCtx.disableJMX();
+Query: `GET /manage/audit?limit=50` — returns most recent N events.
 
-        try {
-            // Register mock components so Camel accepts the URIs
-            // without trying to open real connections
-            registerMockComponents(dryCtx, spec);
+---
 
-            RouteBuilder builder = assembler.assemble(spec);
-            dryCtx.addRoutes(builder);
+## 11. Management API Reference
 
-            // This validates the entire route graph:
-            // - URI structure and parameters
-            // - Expression language syntax
-            // - Route graph connectivity
-            // - Bean reference resolution
-            dryCtx.build();
+### esb-runtime (port 9090)
 
-            return DryRunResult.success(
-                dryCtx.getRoutes().stream()
-                    .map(r -> new RouteInfo(r.getId(), r.getEndpoint().getEndpointUri()))
-                    .toList()
-            );
-        } catch (FailedToCreateRouteException e) {
-            return DryRunResult.failure("Route build failed: " + e.getMessage());
-        } catch (ResolveEndpointFailedException e) {
-            return DryRunResult.failure(
-                "Bad endpoint URI: " + e.getUri() + " — " + e.getMessage()
-            );
-        } finally {
-            try { dryCtx.close(); } catch (Exception ignored) {}
-        }
-    }
+```
+— Route Lifecycle —
+GET    /manage/routes                   List all routes with status (name, state, specVersion)
+GET    /manage/routes/{name}            Get single route spec as YAML
+POST   /manage/routes                   Deploy new route (YAML body)
+PUT    /manage/routes/{name}/reload     Hot-reload from disk without restart
+POST   /manage/routes/{name}/stop       Suspend route (keeps registration)
+POST   /manage/routes/{name}/start      Resume suspended route
+DELETE /manage/routes/{name}            Deregister and remove route
+POST   /manage/routes/{name}/persist    Save in-memory route to filesystem
 
-    private void registerMockComponents(CamelContext ctx, RouteSpec spec) {
-        // Replace real protocol components with mocks for validation only
-        Set<String> schemes = extractSchemes(spec);
-        schemes.forEach(scheme ->
-            ctx.addComponent(scheme, new MockComponent(ctx))
-        );
-    }
-}
+— Audit & Health —
+GET    /manage/audit?limit=50           Recent audit events (AuditEvent[])
+GET    /manage/health                   Health summary {status: UP|DEGRADED, routes: [...]}
+GET    /manage/components               List registered adapters by type
+
+— Camel Business Routes —
+REST   /api/*                           All deployed REST routes (via Camel servlet)
+
+— Spring Actuator —
+GET    /actuator/health
+GET    /actuator/metrics
+GET    /actuator/camelroutes
+```
+
+### esb-designer (port 9191)
+
+```
+POST   /manage/routes/validate          Validate YAML without deploying
+                                          body: RouteSpec YAML
+                                          returns: ValidationReport
+POST   /manage/routes/save              Validate + write to output directory
+                                          body: RouteSpec YAML
+GET    /manage/routes                   List saved route YAML files
+GET    /manage/components               Registered adapters (source/target/transform)
+POST   /manage/transform-preview        Execute transform with test data
+                                          body: { type, spec, input }
+                                          returns: { output, error }
+```
+
+### mock-bank-service (port 8080)
+
+```
+POST   /soap/balance-service            GetAccountBalance SOAP operation
+                                          input: XML with <accountNumber>
+                                          output: SOAP envelope with balance/currency/holder
 ```
 
 ---
 
-## 11. Drag-and-Drop UI Integration
+## 12. Drag-and-Drop UI Integration
 
 ### What the UI Does (and Does Not Do)
 
 ```
 UI RESPONSIBILITY                        SERVER RESPONSIBILITY
 ────────────────                         ─────────────────────
-Draw nodes (from ComponentDescriptor)    Validate WSDL exists
-Render property panels                   Compile XSLT
+Draw nodes (from /manage/components)     Validate WSDL exists
+Render property panels                   Compile transforms
 Basic field format checks                Check env vars
 Build RouteSpec JSON/YAML               Run DryRun compiler
-Send to /api/validate                   Manage live routes
+Send to /manage/routes/validate         Manage live routes
 Display ValidationReport                Hot-reload
-Never talk to Camel directly            Write to Git
-Never call WSDL URLs                    Enforce path conflicts
+Never talk to Camel directly            Write to filesystem
+Never call SOAP/WSDL URLs               Enforce path conflicts
 ```
 
 ### UI ↔ Server API Contract
 
 ```
-GET  /api/components
-     → List<ComponentDescriptor>   (what to show in the component palette)
-     → grouped by tier, role
+GET  /manage/components
+     → List<AdapterDescriptor>   (source + target + transform adapters)
+     → grouped by type/role
 
-POST /api/validate
-     body: RouteSpec JSON
-     query: ?level=STRUCTURAL|SCHEMA|SEMANTIC|COMPATIBILITY|DRY_RUN
-     → ValidationReport { errors[], warnings[], hints[], dryRunDetails }
+POST /manage/routes/validate
+     body: RouteSpec YAML
+     → ValidationReport { messages[], layerReached }
 
-POST /api/routes
-     body: RouteSpec JSON
+POST /manage/routes
+     body: RouteSpec YAML (runtime deploy)
      → requires DRY_RUN validation to have passed
      → deploys route to live CamelContext
-     → writes YAML to Git
      → returns RouteStatus
 
-GET  /api/routes
-     → List<RouteStatus> { name, status, specVersion, uptime, metrics }
+GET  /manage/routes
+     → List<RouteStatus> { name, status, specVersion, uptime }
 
-PUT  /api/routes/{name}/reload
-     → hot-reload without restart
+POST /manage/routes/{name}/stop
+POST /manage/routes/{name}/start
+DELETE /manage/routes/{name}
 
-DELETE /api/routes/{name}
-     → graceful stop + deregister
+GET  /manage/audit?limit=50
+     → AuditEvent[]
 ```
 
 ### Validation Trigger Flow in UI
 
 ```
-User action                    API call                 Debounce
-─────────────────────────────────────────────────────────────────
-Type in any field            → /validate?level=STRUCTURAL   100ms
-Drop a source component      → /validate?level=COMPAT        50ms
-Drop a target component      → /validate?level=COMPAT        50ms
-Upload WSDL/XSLT file        → /validate?level=SEMANTIC   immediate
-Click "Validate All"         → /validate?level=DRY_RUN    immediate (show spinner)
-Click "Deploy"               → POST /api/routes           (DRY_RUN must have passed)
-```
-
-### ValidationReport Response (displayed in UI)
-
-```json
-{
-  "specName": "order-submit",
-  "layerReached": "DRY_RUN",
-  "passed": false,
-  "errors": [
-    {
-      "ruleId": "WSDL_OPERATION_EXISTS",
-      "layer": "SEMANTIC",
-      "field": "target.operation",
-      "message": "Operation 'SubmitOrderV2' not found. Available: [SubmitOrder, CancelOrder]",
-      "suggestion": "Did you mean 'SubmitOrder'?",
-      "severity": "ERROR"
-    }
-  ],
-  "warnings": [
-    {
-      "ruleId": "RETRY_SOAP_FAULT",
-      "layer": "COMPATIBILITY",
-      "message": "SOAP_FAULT not in retryOn list. Add if your operation is idempotent.",
-      "severity": "WARNING"
-    }
-  ],
-  "hints": [
-    {
-      "ruleId": "LOG_BODY_DISABLED",
-      "message": "logBody is false. Enable temporarily for debugging, disable in production.",
-      "severity": "HINT"
-    }
-  ]
-}
+User action                    API call                          Debounce
+───────────────────────────────────────────────────────────────────────────
+Type in any field            → /manage/routes/validate (L1)      100ms
+Drop a source component      → /manage/routes/validate (L2)       50ms
+Drop a target component      → /manage/routes/validate (L2)       50ms
+Upload WSDL/XSLT file        → /manage/routes/validate (L3)    immediate
+Click "Validate All"         → /manage/routes/validate (DRY_RUN) spinner
+Click "Deploy"               → POST /manage/routes (runtime)
 ```
 
 ---
 
-## 12. How to Add a New Component
+## 13. Spring Profiles
+
+Three profiles control runtime behaviour. Default is `demo`.
+
+### demo (default)
+
+```yaml
+# application-demo.yaml
+esb:
+  routes:
+    scan-pattern: "classpath:routes/*.yaml"
+    store-dir: ${user.dir}/routes
+camel:
+  servlet:
+    context-path: "/api/*"
+logging:
+  level:
+    com.finexatech.esb: DEBUG
+
+Beans active:
+  MockSoapController   (@Profile("demo"))   — internal SOAP mock at /mock/soap
+  HotReloadWatcher     — watches store-dir for YAML changes
+
+Use for: local development, demos, integration testing
+```
+
+### init (includes demo)
+
+```yaml
+# application-init.yaml (Spring profile groups: init → [demo])
+esb:
+  routes:
+    store-dir: ${user.dir}/routes/dev    # isolated dev directory
+
+Beans active:
+  InitRuntimeBanner    (@Profile("init"))  — prints dev/debug banner
+  All demo beans (via profile group)
+
+Use for: developer workstations; clean slate each run
+```
+
+### production
+
+```yaml
+# application-production.yaml
+esb:
+  routes:
+    scan-pattern: ""                         # NO classpath scan
+    store-dir: /opt/esb/routes/${BROKER_ID}  # per-broker PVC mount (K8s)
+logging:
+  level:
+    com.finexatech.esb: INFO
+  file:
+    name: ${user.dir}/logs/esb-runtime.log
+
+Beans active:
+  MockSoapController   NOT active
+  HotReloadWatcher     — watches /opt/esb/routes/${BROKER_ID}/
+
+Use for: K8s deployments; JSON structured logs; no classpath routes
+```
+
+### Multi-Broker (K8s)
+
+```
+Broker     Namespace       BROKER_ID     Route prefix
+─────────────────────────────────────────────────────
+Saudi      esb-saudi        broker-sa    broker-sa-*
+Kuwait     esb-kuwait       broker-kw    broker-kw-*
+Dev        esb-dev          broker-dev   broker-dev-*
+```
+
+Route names must match pattern: `^(broker-sa|broker-kw|broker-dev)-[a-z0-9-]+$`
+(enforced by BrokerIsolationRule — Phase 3).
+
+---
+
+## 14. Mock Bank Service (Demo)
+
+The `mock-bank-service` module is a standalone Spring Boot application (no Camel)
+that simulates a legacy bank's SOAP endpoint for demo purposes.
+
+```
+Start:  cd mock-bank-service && ./start.sh   (or start.bat on Windows)
+Stop:   ./stop.sh
+
+Port:   8080
+Endpoint: POST http://localhost:8080/soap/balance-service
+```
+
+### SOAP Contract
+
+```xml
+<!-- Request -->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <GetAccountBalance>
+      <accountNumber>ACC001</accountNumber>
+    </GetAccountBalance>
+  </soap:Body>
+</soap:Envelope>
+
+<!-- Response -->
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <GetAccountBalanceResponse>
+      <accountNumber>ACC001</accountNumber>
+      <accountHolder>Ahmed Al-Rashid</accountHolder>
+      <balance>125000.00</balance>
+      <currency>SAR</currency>
+      <lastUpdated>2025-03-11T...</lastUpdated>
+    </GetAccountBalanceResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+### Pre-loaded Accounts
+
+| Account # | Holder | Balance | Currency |
+|---|---|---|---|
+| ACC001 | Ahmed Al-Rashid | 125,000 | SAR |
+| ACC002 | Fatima Al-Zahra | 87,500 | SAR |
+| ACC003 | Mohammed Al-Farsi | 250,000 | SAR |
+| ACC004 | Sara Al-Otaibi | 45,000 | SAR |
+
+Unknown accounts return a SOAP Fault with code `ACCOUNT_NOT_FOUND`.
+
+---
+
+## 15. How to Add a New Component
 
 ### The Checklist (follow every time — no exceptions)
 
 ```
-Step 1: Check if GenericCamelAdapter covers it
-  □ Does the component have a straightforward URI? (scheme:address?params)
-  □ No custom session management or protocol handshake?
-  □ No proprietary library beyond camel-xxx dependency?
-  → YES to all: skip to Step 3. No Java code needed.
-  → NO to any: write a SpecializedAdapter (Step 2)
+Step 1: Decide adapter tier
+  □ Protocol maps cleanly to a single Camel URI?  → Tier B SpecializedAdapter
+  □ Completely proprietary / no Camel component?  → Tier B CustomAdapter
 
-Step 2: Write adapter (only if needed)
+Step 2: Write adapter
   □ Create esb-adapters/target/{Name}TargetAdapter.java
-  □ Implement TargetAdapter (or extend GenericCamelTargetAdapter)
+  □ Implement TargetAdapter interface
   □ Annotate @Component
-  □ Override only buildToUri, preProcessor, postProcessor as needed
-  □ Write unit test with mock CamelContext
+  □ Implement: protocol(), buildToUri(), preProcessor(), postProcessor()
+  □ Write unit test: verify buildToUri() produces correct URI
 
-Step 3: Add component override YAML
-  □ Create esb-catalog/src/main/resources/components/overrides/{scheme}.yaml
-  □ Set: scheme, role, tier, displayName, uiIcon, uiColor
-  □ Set: uriTemplate, requiredParams, uiVisibleParams
-  □ Set: validationRules list (reference existing or new rule classes)
-
-Step 4: Add semantic validation rule (if needed)
+Step 3: Add semantic validation rule (if needed)
   □ Create esb-compiler/validation/rules/semantic/{Name}ExistsRule.java
-  □ Implement SpecRule, set layer = ValidationLayer.SEMANTIC
-  □ annotate @Component
+  □ Implement SpecRule; set layer = ValidationLayer.SEMANTIC
+  □ Annotate @Component
   □ Write unit test
 
-Step 5: Update compatibility matrix
+Step 4: Update compatibility matrix
   □ Open CompatibilityMatrix.java
-  □ Add row/column entry for new scheme
-  □ Define valid source↔target combinations
+  □ Add valid source↔target combinations for the new scheme
 
-Step 6: Add Maven dependency
+Step 5: Add Maven dependency
   □ Add camel-{component} to esb-adapters/pom.xml
 
-Step 7: Test
+Step 6: Test
   □ Unit test: adapter builds correct URI from sample spec
   □ Integration test: end-to-end route with mock endpoint
   □ DryRun test: CamelDryRunCompiler accepts the assembled route
 
-Step 8: Document
-  □ Add entry to docs/COMPONENTS.md
+Step 7: Document
+  □ Add entry to this section
   □ Add example YAML to docs/examples/{scheme}-example.yaml
 ```
 
----
+### Critical Patterns for New Adapters
 
-## 13. Development Phases
+```java
+// SOAP: always remove HTTP routing headers before bridging
+@Override
+public Processor preProcessor(TargetSpec spec) {
+    return exchange -> {
+        exchange.getIn().removeHeader(Exchange.HTTP_PATH);
+        exchange.getIn().removeHeader(Exchange.HTTP_URI);
+        exchange.getIn().removeHeader(Exchange.HTTP_QUERY);
+        exchange.getIn().setHeader("SOAPAction", spec.getOperation());
+    };
+}
 
-### Phase 1 — Core Foundation (Weeks 1–3)
-
-```
-Week 1: Skeleton + T0 Source/Target
-  □ Maven multi-module scaffold
-  □ RouteSpec POJOs + Jackson YAML parsing
-  □ RouteAssembler (immutable, complete)
-  □ RestSourceAdapter
-  □ SoapTargetAdapter (CXF)
-  □ XsltTransformAdapter + JoltTransformAdapter
-  □ All 5 interceptors wired
-  □ One end-to-end test: REST POST → SOAP stub → JSON response
-  ✓ DoD: curl to REST endpoint, SOAP mock returns, JSON comes back
-
-Week 2: Validation + Production Basics
-  □ ValidationPipeline with all L1–L4 rules
-  □ DryRunCompiler (L5)
-  □ WsdlExistsRule, XsltCompilesRule, EnvVarResolvableRule
-  □ CompatibilityMatrix (T0 components)
-  □ CorrelationIdFilter (MDC)
-  □ Micrometer metrics (route timer, success/error counters)
-  □ Structured JSON logging
-  □ Global error handler → clean JSON error responses
-  □ Retry + timeout from spec
-  ✓ DoD: SOAP down → 503 JSON with correlation ID. Retry works. p99 < 2s at 100rps.
-
-Week 3: Registry + Hot Reload
-  □ CamelCatalogLoader (load Camel catalog at startup)
-  □ ComponentDescriptor + override YAML loader
-  □ RouteRegistry (list, start, stop, reload)
-  □ HotReloadWatcher (FileWatcher → reload on YAML change)
-  □ /actuator/esb/routes endpoint
-  □ Full integration test suite
-  □ CI pipeline with DRY_RUN validation on commit
-  ✓ DoD: Edit YAML without restart → new route live within 5s
-
-### Phase 2 — Messaging + Management API (Month 2)
-
-  □ T1 components: JMS, Kafka
-  □ Management REST API (/api/components, /api/validate, /api/routes)
-  □ Content-Based Router support in RouteAssembler
-  □ Phase-2 UI: React canvas (consumes /api/components, calls /api/validate)
-  □ Git write-back (deploy → write YAML to Git branch)
-
-### Phase 3 — Specialized + UI Polish (Month 3+)
-
-  □ T2: Timer, File, SFTP, HTTP(outbound)
-  □ T3: FIXML, JDBC, gRPC (demand-driven)
-  □ Splitter, Aggregator routing patterns
-  □ Schema registry integration (Kafka Avro)
-  □ Route versioning (spec v1 → v2 migration)
+// Groovy transforms: use ${headers['key']} not def key = headers.key
+// The def binding is local and does NOT survive GString interpolation.
 ```
 
 ---
 
-## 14. Technology Stack
+## 16. Development Phases
+
+### Phase 1 — Core Foundation ✓ COMPLETE
+
+```
+✓ Maven multi-module scaffold (esb-spec, esb-compiler, esb-adapters, esb-runtime)
+✓ RouteSpec POJOs + Jackson YAML parsing
+✓ RouteAssembler (immutable, complete)
+✓ RestSourceAdapter, DirectSourceAdapter, TimerSourceAdapter
+✓ SoapTargetAdapter, RestTargetAdapter
+✓ JoltTransformAdapter, GroovyTransformAdapter, PassthroughTransformAdapter
+✓ CorrelationInterceptor, ErrorHandlingInterceptor, RetryInterceptor
+✓ ValidationPipeline with L1–L4 rules
+✓ LiveRouteRegistry (list, start, stop, reload)
+✓ HotReloadWatcher (WatchService → trigger reload on YAML change)
+✓ RouteManagementController (/manage/routes full lifecycle)
+✓ One end-to-end: REST POST → SOAP mock → JSON response
+```
+
+### Phase 2 — Designer + UI ✓ COMPLETE
+
+```
+✓ esb-designer service (port 9191): validate, preview, save
+✓ TransformPreviewController — test transforms with real data
+✓ esb-ui: React + Vite + Tailwind + React Flow
+✓ RouteBuilderPage — drag-drop canvas with live YAML editor
+✓ JoltFieldMapperModal + GroovySoapMapperModal
+✓ AuditInterceptor + AuditStore + AuditController
+✓ AuditPage — audit trail in UI
+✓ RouteAssemblerFacade + ComplexRouteAssembler (EIP patterns)
+✓ Process steps: set-header, log, script, route-to, split, wire-tap
+✓ Content-based routing in RouteAssembler
+✓ mock-bank-service module (standalone SOAP simulator)
+✓ Start/stop scripts at repo root
+✓ Spring profiles: demo (default), init, production
+✓ HttpLoggedTargetAdapter, MockResponseTargetAdapter, MockEchoTargetAdapter
+```
+
+### Phase 3 — Production-Grade (In Progress)
+
+```
+Priority 1 — Interceptor chain (fix GAP-003 first):
+  □ ResilienceInterceptor — replace ErrorHandling+Retry pair (order=10)
+  □ AuthInterceptor — enforce AuthSpec JWT/basic/api-key (order=5)
+  □ IdempotentConsumerInterceptor (order=6)
+  □ RateLimitInterceptor — token bucket per route (order=8)
+
+Priority 2 — Spec POJOs:
+  □ CircuitBreakerSpec, AuditSpec, IdempotencySpec, RateLimitSpec
+  □ TlsSpec, OAuthClientSpec (on TargetSpec)
+  □ Add to RouteSpec: circuitBreaker, audit, idempotency
+  □ Add to SourceSpec: rateLimit
+  □ Add to TargetSpec: tls, oauthClient
+
+Priority 3 — Observability:
+  □ Micrometer metrics per route (timer, success/error counters)
+  □ Dead-letter queue management API: /manage/dlq/**
+  □ Route history + metrics: /manage/routes/{name}/history|metrics
+  □ Structured JSON logs in production profile (logstash-logback)
+
+Priority 4 — Messaging (T1):
+  □ JmsTargetAdapter, JmsSourceAdapter
+  □ KafkaTargetAdapter, KafkaSourceAdapter
+
+Priority 5 — Multi-broker:
+  □ BrokerIsolationRule (route name must match BROKER_ID prefix)
+  □ K8s Helm charts (per-broker namespace)
+
+Priority 6 — Cleanup:
+  □ REMOVE MockResponseTargetAdapter + MockEchoTargetAdapter
+  □ Hide mock adapters from UI palette (isInternal() flag)
+  □ Replace mock-balance-service.yaml with proper simulator route
+```
+
+---
+
+## 17. Technology Stack
 
 ```
 Runtime
-  Spring Boot          3.3.x
-  Apache Camel         4.7.x    (Camel 4 = Spring Boot 3 native)
-  Apache CXF           4.0.x    (SOAP/WSDL)
-  Saxon HE             12.x     (XSLT 3.0 processor)
-  Jolt                 0.1.x    (JSON→JSON transform)
+  Spring Boot          3.3.4
+  Apache Camel         4.7.0    (Camel 4 = Spring Boot 3 native, Jakarta namespace)
+  Groovy               3.x      (inline transform scripts)
+  Jolt                 0.1.7    (JSON→JSON transform)
+  Jackson              2.17.2   (YAML/JSON parsing)
+  Java                 17       (minimum for Camel 4.x)
 
-Observability
-  Micrometer           1.13.x   (metrics)
-  logstash-logback     7.4      (structured JSON logs)
+UI
+  React                18.x
+  Vite                 5.x      (build tool)
+  TypeScript           5.x
+  Tailwind CSS         3.x
+  React Flow           11.x     (canvas drag-drop)
+  Axios                (API client)
+
+Observability (current)
   Spring Actuator               (health, metrics endpoints)
+  AuditStore                   (in-memory audit events)
+  MDC Correlation IDs          (via CorrelationInterceptor)
 
-Catalog & Validation
-  camel-catalog        4.7.x    (built-in component metadata — key dependency)
-  Jackson Dataformat YAML       (YAML parsing)
-  json-schema-validator         (L2 JSON Schema validation)
-  Hibernate Validator           (bean validation in POJOs)
-
-Testing
-  JUnit 5
-  AssertJ
-  Mockito
-  Camel Test Kit (camel-test-spring-junit5)
-  WireMock                      (mock SOAP/REST targets in tests)
-  Testcontainers                (real JMS/Kafka in integration tests)
+Observability (Phase 3 target)
+  Micrometer           1.13.x   (route metrics)
+  logstash-logback     7.4      (structured JSON logs)
+  Prometheus scrape             (/actuator/prometheus)
 
 Build
-  Maven 3.9.x          (multi-module)
-  Checkstyle           (enforce code style)
-  SpotBugs             (static analysis)
-  JaCoCo               (coverage gate: min 80%)
+  Maven                3.9.x    (multi-module)
+  Parent BOM includes BOTH camel-bom AND camel-spring-boot-bom
+  jolt.version=0.1.7 (explicit — jolt-core in esb-adapters)
+  App port: 9090 (not 8080 — occupied by mock-bank-service)
+
+Key BOM rule:
+  Root pom must declare BOTH:
+    camel-bom          (core Camel artifacts)
+    camel-spring-boot-bom  (Spring Boot auto-configuration)
+  Missing either causes version conflicts at runtime.
 ```
 
 ---
 
-## 15. Risk Register
+## 18. Risk Register
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Camel catalog metadata incomplete for some components | Medium | Medium | Override YAML supplements catalog; custom descriptors for edge cases |
-| WSDL changes break existing routes silently | High | High | Contract test each WSDL in CI; version WSDLs in Git; `WsdlOperationExistsRule` on deploy |
-| DryRun compiler gives false positives (mock too permissive) | Medium | Medium | Integration tests always run against real components in CI; DryRun is a safety net, not sole gate |
-| Hot-reload drops in-flight requests | Medium | High | Graceful stop: drain in-flight → stop → swap → restart; configurable drain timeout |
-| Secrets in YAML committed to Git | High | Critical | `EnvVarResolvableRule` enforces ${VAR} syntax; pre-commit hook blocks literal secrets; secret scanning in CI |
-| RouteAssembler becomes a God class | Low | High | Enforced by architecture: only adapters change; PR review gate: no PRs that modify RouteAssembler |
-| PII leaks in logs | High | Critical | `logBody: false` default; LogMaskingProcessor in interceptor chain; log review in security audit |
+| GAP-003: RetryInterceptor never fires | **CONFIRMED** | High | Replace with ResilienceInterceptor (Phase 3 P1) |
+| Secrets in YAML committed to Git | High | Critical | `EnvVarResolvableRule` enforces ${VAR} syntax; pre-commit hook blocks literal secrets |
+| WSDL changes break routes silently | High | High | Contract test each WSDL in CI; `WsdlOperationExistsRule` on deploy |
+| PII leaks in logs | High | Critical | `logBody: false` default; Phase 3 LogMaskingProcessor in interceptor chain |
+| Hot-reload drops in-flight requests | Medium | High | Graceful stop: drain in-flight → stop → swap → restart |
 | Path conflict between two YAML files | Medium | High | `PathConflictRule` checks all live routes on every deploy |
-| GenericAdapter silently builds wrong URI | Medium | Medium | Every adapter has URI-build unit test; DryRun catches resolution failures |
+| RouteAssembler becomes a God class | Low | High | Enforced by architecture: only adapters change; PR gate: no PRs modify RouteAssembler |
+| SoapTargetAdapter sends wrong HTTP headers | Medium | High | Must `removeHeader(HTTP_PATH/URI/QUERY)`; `bridgeEndpoint=true` alone is not sufficient |
+| Groovy GString binding broken | Medium | Medium | Use `${headers['key']}` — `def key = headers.key` breaks GString interpolation |
+| Mock adapters left in production palette | Medium | Medium | Phase 3: add `isInternal()` to TargetAdapter interface; hide from UI |
 | Camel version upgrade breaks adapters | Medium | Medium | Pin versions in BOM; upgrade in dedicated branch with full integration test run |
 
 ---
@@ -1221,9 +1236,12 @@ Build
 | Decision | Alternatives Considered | Why This Choice |
 |---|---|---|
 | Use Camel catalog as component source | Manual component registry | 300+ components for free; always up to date |
-| Generic + Specialized + Custom adapter tiers | One adapter per component | 80% coverage with zero code; custom only where needed |
+| Specialized + Custom adapter tiers | One adapter per component | Explicit, testable; no magic generic adapter hiding bugs |
 | RouteAssembler is immutable | Regenerate per route type | Prevents N×M explosion; single test surface |
 | 5-layer validation pipeline | Single validate step | Each layer has different cost; UI can call cheapest layer on each keystroke |
 | YAML spec as the contract | Java DSL / UI model | Works with CI, Git, curl, UI equally; language-agnostic |
 | DryRun with isolated CamelContext | Static analysis only | Camel's own engine is the validator; catches what static analysis cannot |
-| Override YAML for UI metadata | Hardcode in Java | Non-developer can extend component catalog; no recompile needed |
+| RouteAssemblerFacade injection | Direct RouteAssembler injection | Facade routes to simple or complex assembler; callers unaware of complexity |
+| Two assemblers (simple + complex) | One assembler for all patterns | Complex EIP patterns don't pollute the simple linear path |
+| AuditStore in-memory | Database / external log | Zero dependency for Phase 2; Phase 3 will add persistence |
+| Spring profiles (demo/init/production) | Single application.yaml | Clean separation of dev/demo/prod config; MockSoapController excluded from prod |

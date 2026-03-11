@@ -101,6 +101,23 @@ public class LiveRouteRegistry {
         return register(spec);   // register() handles deregister internally
     }
 
+    /**
+     * Suspend (pause) a route — keeps the spec in the registry,
+     * stops accepting new messages, in-flight messages drain first.
+     */
+    public void suspend(String routeName) throws Exception {
+        camelContext.getRouteController().suspendRoute(routeName);
+        log.info("Route '{}' suspended", routeName);
+    }
+
+    /**
+     * Resume a previously suspended route.
+     */
+    public void resume(String routeName) throws Exception {
+        camelContext.getRouteController().resumeRoute(routeName);
+        log.info("Route '{}' resumed", routeName);
+    }
+
     public Collection<RouteSpec> allSpecs() {
         return Collections.unmodifiableCollection(liveSpecs.values());
     }

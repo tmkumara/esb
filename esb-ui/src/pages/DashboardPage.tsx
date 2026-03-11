@@ -30,7 +30,7 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[#1e3a8a]">Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-0.5">ESB runtime overview</p>
+          <p className="text-slate-400 text-sm mt-0.5">HUB runtime overview</p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" icon={<RefreshCw className="w-4 h-4" />} onClick={() => fetchRoutes()} loading={loading}>
@@ -70,7 +70,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardBody className="space-y-1">
             {[
-              { label: 'ESB Status', value: <Badge variant="success">UP</Badge> },
+              { label: 'HUB Status', value: <Badge variant="success">UP</Badge> },
               { label: 'Camel Context', value: <Badge variant="success">Running</Badge> },
               { label: 'Route Registry', value: <Badge variant="info">{total} routes</Badge> },
               { label: 'Hot Reload', value: <Badge variant="success">Active</Badge> },

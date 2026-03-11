@@ -5,6 +5,7 @@ import RoutesPage from './pages/RoutesPage';
 import RouteBuilderPage from './pages/RouteBuilderPage';
 import ValidationPage from './pages/ValidationPage';
 import MonitoringPage from './pages/MonitoringPage';
+import AuditPage from './pages/AuditPage';
 import { ToastProvider } from './hooks/useToast';
 
 // designer mode shows Builder + Validation; runtime mode shows Monitor-only UI
@@ -22,6 +23,7 @@ function App() {
             {isDesigner && <Route path="builder" element={<RouteBuilderPage />} />}
             {isDesigner && <Route path="validation" element={<ValidationPage />} />}
             <Route path="monitoring" element={<MonitoringPage />} />
+            <Route path="audit" element={<AuditPage />} />
             {/* Redirect builder/validation to dashboard in runtime mode */}
             {!isDesigner && <Route path="builder" element={<Navigate to="/dashboard" replace />} />}
             {!isDesigner && <Route path="validation" element={<Navigate to="/dashboard" replace />} />}
