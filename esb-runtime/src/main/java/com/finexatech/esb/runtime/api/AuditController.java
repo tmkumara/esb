@@ -24,7 +24,7 @@ public class AuditController {
 
     @GetMapping
     public List<AuditEvent> getAuditLog(
-            @RequestParam(defaultValue = "50") int limit) {
+            @RequestParam(name = "limit", defaultValue = "50") int limit) {
         return auditStore.recent(limit);
     }
 }
